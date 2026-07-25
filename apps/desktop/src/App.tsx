@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Activity, Cable, Circle, Copy, KeyRound, Pause, Play, QrCode, Search, Settings, ShieldCheck, Square, Wifi, X } from "lucide-react";
+import { Activity, Cable, Circle, Copy, KeyRound, Pause, Play, QrCode, Search, Settings, ShieldCheck, Square, TestTube2, Trash2, Wifi, X } from "lucide-react";
 import * as api from "./api";
 import type { AndroidApp, AndroidCertificateInstall, AndroidDevice, BodyStorage, HttpTransaction, LogIncident, ProxyStatus, QrPairingChallenge } from "./types";
 
@@ -61,7 +61,9 @@ export function App() {
       listen<{payload: HttpTransaction}>("transaction-updated", e =>
         setTransactions(current => current.map(tx => tx.id === e.payload.payload.id ? e.payload.payload : tx))),
       listen<{payload: HttpTransaction}>("transaction-completed", e =>
-        setTransactions(current => current.map(tx => tx.id === e.payload.payload.id ? e.payload.payload : tx))),
+        setTransactions(current => current.some(tx => tx.id === e.payload.payload.id)
+          ? current.map(tx => tx.id === e.payload.payload.id ? e.payload.payload : tx)
+          : [e.payload.payload, ...current])),
       listen<{payload: LogIncident}>("incident-created", e => {
         const incident = e.payload.payload;
         setIncidents(current => [incident, ...current].slice(0, 100));
@@ -147,6 +149,20 @@ export function App() {
     } catch (error) { setConnectionError(String(error)); setNotice(String(error)); }
     finally { setConnecting(false); }
   }
+  async function deleteAll() {
+    if (!window.confirm("Delete all captured API history? This cannot be undone.")) return;
+    try { await api.deleteAllTransactions(); setTransactions([]); setSelectedId(undefined); setIncidents([]); setNotice("All captured API history was deleted."); }
+    catch (error) { setNotice(String(error)); }
+  }
+  async function testYesterday() {
+    if (!window.confirm("Replay every testable API captured yesterday? Requests may include state-changing methods. Requests containing redacted credentials or data are skipped.")) return;
+    setConnecting(true);
+    try {
+      const summary = await api.testYesterdaysApis();
+      setNotice(`Yesterday replay: ${summary.completed} completed, ${summary.changed} changed, ${summary.failed} failed, ${summary.skipped} skipped.`);
+    } catch (error) { setNotice(String(error)); }
+    finally { setConnecting(false); }
+  }
   function copy(value: string) { void navigator.clipboard.writeText(value); setNotice("Copied to clipboard"); }
 
   return <main className="shell">
@@ -171,6 +187,8 @@ export function App() {
       <label className="search"><Search/><input placeholder="Search method, host, path, status…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
       <button className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}>Changed only</button>
       <button className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}>Errors only</button>
+      <button disabled={connecting} onClick={()=>void testYesterday()}><TestTube2/>Test yesterday’s APIs</button>
+      <button className="danger" onClick={()=>void deleteAll()}><Trash2/>Delete all</button>
       <button onClick={()=>setPaused(v=>!v)}>{paused?<Play/>:<Pause/>}{paused?"Resume":"Pause"} UI</button>
       <span className="count">{visible.length} requests</span>
     </section>

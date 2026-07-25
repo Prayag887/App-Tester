@@ -2,6 +2,7 @@ use crate::traffic::HttpTransaction;
 use rusqlite::{Connection, params};
 use std::{path::Path, sync::Mutex};
 use thiserror::Error;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -67,6 +68,22 @@ impl Database {
         rows.next()?
             .map(|row| Ok(serde_json::from_str(&row.get::<_, String>(0)?)?))
             .transpose()
+    }
+    pub fn transactions_between(
+        &self,
+        start: OffsetDateTime,
+        end: OffsetDateTime,
+    ) -> Result<Vec<HttpTransaction>, StoreError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare("SELECT payload_json FROM transactions WHERE created_at >= ?1 AND created_at < ?2 ORDER BY created_at ASC")?;
+        let rows = statement.query_map(params![start.to_string(), end.to_string()], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+    pub fn delete_all_transactions(&self) -> Result<(), StoreError> {
+        self.connection()?.execute_batch("DELETE FROM request_headers; DELETE FROM response_headers; DELETE FROM body_artifacts; DELETE FROM observations; DELETE FROM comparisons; DELETE FROM differences; DELETE FROM correlations; DELETE FROM transactions;")?;
+        Ok(())
     }
     pub fn approve_baseline(
         &self,

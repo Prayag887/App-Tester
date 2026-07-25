@@ -19,3 +19,4 @@ tauri = { version = "2.11.5", features = [] }
 tokio.workspace = true
 uuid.workspace = true
 time.workspace = true
+reqwest.workspace = true

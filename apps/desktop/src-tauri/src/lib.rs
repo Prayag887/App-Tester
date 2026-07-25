@@ -5,6 +5,7 @@ use androidqa_core::{
     launch_app, list_devices, list_third_party_apps,
     persistence::Database,
     proxy::{CertificateInfo, ProxyConfiguration, ProxyService, ProxyStatus, generate_ca},
+    replay::ReplaySummary,
     traffic::HttpTransaction,
 };
 use std::{
@@ -13,6 +14,7 @@ use std::{
     time::Duration,
 };
 use tauri::{Emitter, Manager};
+use time::{OffsetDateTime, PrimitiveDateTime, Time};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
@@ -295,6 +297,71 @@ fn list_transactions(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn delete_all_transactions(state: tauri::State<'_, InspectorState>) -> Result<(), String> {
+    state
+        .database
+        .delete_all_transactions()
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn test_yesterdays_apis(
+    state: tauri::State<'_, InspectorState>,
+) -> Result<ReplaySummary, String> {
+    let today = OffsetDateTime::now_utc().date();
+    let yesterday = today
+        .previous_day()
+        .ok_or_else(|| "could not calculate yesterday".to_owned())?;
+    let start = PrimitiveDateTime::new(yesterday, Time::MIDNIGHT).assume_utc();
+    let end = PrimitiveDateTime::new(today, Time::MIDNIGHT).assume_utc();
+    let baselines = state
+        .database
+        .transactions_between(start, end)
+        .map_err(|error| error.to_string())?;
+    let session_id = (*state
+        .session_id
+        .lock()
+        .map_err(|_| "session lock poisoned")?)
+    .unwrap_or_else(Uuid::new_v4);
+    *state
+        .session_id
+        .lock()
+        .map_err(|_| "session lock poisoned")? = Some(session_id);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut summary = ReplaySummary::default();
+    for baseline in baselines {
+        if androidqa_core::replay::replay_blocker(&baseline).is_some() {
+            summary.skipped += 1;
+            continue;
+        }
+        summary.attempted += 1;
+        let result = androidqa_core::replay::replay(&client, &baseline, session_id).await;
+        if result.state == androidqa_core::traffic::TransactionState::Failed {
+            summary.failed += 1;
+        } else {
+            summary.completed += 1;
+            if result
+                .comparison
+                .as_ref()
+                .is_some_and(|comparison| !comparison.differences.is_empty())
+            {
+                summary.changed += 1;
+            }
+        }
+        state
+            .database
+            .upsert_transaction(&result)
+            .map_err(|error| error.to_string())?;
+        state
+            .proxy
+            .events()
+            .send(InspectorEvent::TransactionCompleted(result));
+    }
+    Ok(summary)
+}
+#[tauri::command]
 fn get_transaction(
     state: tauri::State<'_, InspectorState>,
     id: Uuid,
@@ -383,6 +450,8 @@ pub fn run() {
             clear_android_proxy,
             verify_android_proxy,
             list_transactions,
+            delete_all_transactions,
+            test_yesterdays_apis,
             get_transaction,
             approve_baseline
         ])

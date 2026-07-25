@@ -48,3 +48,4 @@ export interface LogIncident {
   id: string; category: string; title: string; message: string; occurrence_count: number;
   occurred_at: string; lines: { timestamp_ms:number; level:string; tag:string; message:string }[];
 }
+export interface ReplaySummary { attempted:number; completed:number; changed:number; skipped:number; failed:number }

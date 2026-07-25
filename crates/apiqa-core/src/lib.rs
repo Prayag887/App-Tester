@@ -16,6 +16,7 @@ pub mod events;
 pub mod issues;
 pub mod persistence;
 pub mod proxy;
+pub mod replay;
 pub mod session;
 pub mod traffic;
 
