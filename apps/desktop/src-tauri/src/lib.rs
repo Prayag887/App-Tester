@@ -1,5 +1,5 @@
 use androidqa_core::{
-    AndroidApp, AndroidDevice, ProcessAdb, android,
+    AdbRunner, AndroidApp, AndroidDevice, ProcessAdb, android,
     android::{AndroidCertificateInstall, QrPairingChallenge, QrPairingResult, QrPairingSecret},
     events::{EventBroadcaster, InspectorEvent},
     launch_app, list_devices, list_third_party_apps,
@@ -137,6 +137,21 @@ fn prepare_companion_install(app: tauri::AppHandle) -> Result<CompanionInstall, 
         qr_svg,
         expires_at,
     })
+}
+
+#[tauri::command]
+async fn install_companion(app: tauri::AppHandle, serial: String) -> Result<String, String> {
+    let apk_path = companion_apk_path(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        let apk = apk_path
+            .to_str()
+            .ok_or_else(|| "companion APK path contains unsupported characters".to_string())?;
+        adb.run(&["-s", &serial, "install", "-r", apk])
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("companion install task failed: {error}"))?
 }
 
 fn companion_apk_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -933,6 +948,7 @@ pub fn run() {
             launch_installed_app,
             begin_qr_pairing,
             prepare_companion_install,
+            install_companion,
             finish_qr_pairing,
             pair_with_code,
             enable_usb_wifi,

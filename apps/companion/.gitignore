@@ -6,3 +6,5 @@
 build/
 android/.gradle/
 android/local.properties
+android/signing.properties
+android/*.jks

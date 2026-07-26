@@ -32,7 +32,16 @@ flutter build apk --debug
 
 If `android/local.properties` is not created by Flutter, add one containing `flutter.sdk=/absolute/path/to/flutter`.
 
-The checked-in release configuration uses the local Android debug signing key so the generated development APK is installable by QR. Configure your managed release keystore before distributing outside the development team.
+The release APK is signed with a local release key that is never committed. Before the first build, create `android/signing.properties` and the matching `.jks` file:
+
+```properties
+storeFile=app-tester-release.jks
+storePassword=your-keystore-password
+keyAlias=app-tester-companion
+keyPassword=your-key-password
+```
+
+Keep both files private. A release key makes the APK a stable, attributable build, but Android still requires a user opt-in to install an app obtained outside a trusted store. That confirmation cannot be bypassed safely by a QR link.
 
 The package is feature-first:
 

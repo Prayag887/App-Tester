@@ -91,6 +91,7 @@ export function App() {
   const [enablingUsbWifi, setEnablingUsbWifi] = useState(false);
   const [certificateInstall, setCertificateInstall] = useState<AndroidCertificateInstall>();
   const [companionInstall, setCompanionInstall] = useState<CompanionInstall>();
+  const [installingCompanion, setInstallingCompanion] = useState(false);
   const [caStatus, setCaStatus] = useState<AndroidCaStatus>();
   const [caChanging, setCaChanging] = useState(false);
   const [incidents, setIncidents] = useState<LogIncident[]>([]);
@@ -249,6 +250,18 @@ export function App() {
       setCompanionInstall(await api.prepareCompanionInstall());
     } catch (error) {
       setNotice(`Could not prepare the companion installer: ${String(error)}`);
+    }
+  }
+  async function installCompanionDirectly() {
+    if (!device) return;
+    setInstallingCompanion(true);
+    try {
+      await api.installCompanion(device);
+      setCompanionInstall(undefined);
+    } catch (error) {
+      setNotice(`Could not install the companion: ${String(error)}`);
+    } finally {
+      setInstallingCompanion(false);
     }
   }
   async function selectPackage(nextPackage: string) {
@@ -459,8 +472,9 @@ export function App() {
         <button className="close" aria-label="Close" onClick={()=>setCompanionInstall(undefined)}><X/></button>
         <div className="qr-heading"><ShieldCheck/><div><h2 id="companion-title">Install App Tester Companion</h2><p>Same Wi-Fi required</p></div></div>
         <div className="qr-image" dangerouslySetInnerHTML={{__html:companionInstall.qr_svg}} />
-        <ol><li>Connect the phone and this Mac to the same Wi-Fi network.</li><li>Scan this code with the phone camera and download the APK.</li><li>Allow this browser to install unknown apps, then open the companion.</li></ol>
-        <p className="warning">The link expires at {new Date(companionInstall.expires_at).toLocaleTimeString()}. Install only from this App Tester window.</p>
+        <ol><li>Connect the phone and this Mac to the same Wi-Fi network.</li><li>Scan this code with the phone camera and download the signed APK.</li><li>Approve Android’s one-time install confirmation, then open the companion.</li></ol>
+        {device && <button className="primary submit" disabled={installingCompanion} onClick={()=>void installCompanionDirectly()}>{installingCompanion ? "Installing…" : "Install directly on selected device"}</button>}
+        <p className="warning">The link expires at {new Date(companionInstall.expires_at).toLocaleTimeString()}. If Android blocks browser downloads, select a paired Wi-Fi device above and use direct install.</p>
       </section>
     </div>}
   </section></main>;

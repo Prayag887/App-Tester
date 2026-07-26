@@ -33,6 +33,7 @@ export const deleteAllTransactions = async ():Promise<void> => invoke("delete_al
 export const testYesterdaysApis = async ():Promise<ReplaySummary> => invoke("test_yesterdays_apis");
 export const beginQrPairing = async ():Promise<QrPairingChallenge> => invoke("begin_qr_pairing");
 export const prepareCompanionInstall = async ():Promise<CompanionInstall> => invoke("prepare_companion_install");
+export const installCompanion = async (serial:string):Promise<string> => invoke("install_companion", { serial });
 export const finishQrPairing = async (pairingId:string):Promise<QrPairingResult> => invoke("finish_qr_pairing",{pairingId});
 export const pairWithCode = async (host:string, port:number, pairingCode:string):Promise<QrPairingResult> =>
   invoke("pair_with_code", { host, port, pairingCode });
