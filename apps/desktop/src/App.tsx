@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Activity, AlertCircle, Cable, CalendarDays, Circle, Copy, Filter, KeyRound, Pause, Play, QrCode, Search, Settings, ShieldCheck, SlidersHorizontal, Wifi, X } from "lucide-react";
+import { Activity, AlertCircle, Cable, CalendarDays, Circle, Copy, Filter, KeyRound, Pause, Play, QrCode, Search, Settings, ShieldCheck, SlidersHorizontal, Square, Trash2, Wifi, X } from "lucide-react";
 import * as api from "./api";
 import type { AndroidApp, AndroidCertificateInstall, AndroidDevice, BodyStorage, HttpTransaction, LogIncident, ProxyStatus, QrPairingChallenge } from "./types";
 
@@ -24,7 +24,34 @@ export const fullEndpoint = (tx: HttpTransaction) =>
   `${tx.request.scheme}://${tx.request.host}${tx.request.path}`;
 export const endpointIsExcluded = (tx: HttpTransaction, exclusions: string[]) => {
   const endpoint = fullEndpoint(tx).trim().toLowerCase();
-  return exclusions.some(value => value.trim().toLowerCase() === endpoint);
+  const host = tx.request.host.trim().toLowerCase();
+  return exclusions.some(value => {
+    const exclusion = value.trim().toLowerCase().replace(/\/$/, "");
+    if (!exclusion) return false;
+    if (exclusion.includes("://")) {
+      return endpoint === exclusion || endpoint.startsWith(`${exclusion}/`) ||
+        endpoint.startsWith(`${exclusion}?`);
+    }
+    const [excludedHost, ...pathParts] = exclusion.split("/");
+    const hostMatches = host === excludedHost || host.endsWith(`.${excludedHost}`);
+    if (!hostMatches) return false;
+    const excludedPath = pathParts.length ? `/${pathParts.join("/")}` : "";
+    return !excludedPath || tx.request.path.toLowerCase().startsWith(excludedPath);
+  });
+};
+export const endpointSuggestions = (transactions: HttpTransaction[], input: string, limit = 8) => {
+  const query = input.trim().toLowerCase();
+  if (!query) return [];
+  return [...new Set(transactions.map(fullEndpoint))]
+    .filter(endpoint => endpoint.toLowerCase().includes(query))
+    .slice(0, limit);
+};
+export const preferredDevice = (current: string, devices: AndroidDevice[]) => {
+  if (devices.some(device => device.serial === current && device.authorization_status === "authorized")) {
+    return current;
+  }
+  return devices.find(device => device.connection_type === "usb" && device.authorization_status === "authorized")?.serial ??
+    devices.find(device => device.authorization_status === "authorized")?.serial ?? "";
 };
 const jsonView = (value: string) => {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
@@ -58,18 +85,28 @@ export function App() {
   const [connectionError, setConnectionError] = useState("");
   const [certificateInstall, setCertificateInstall] = useState<AndroidCertificateInstall>();
   const [incidents, setIncidents] = useState<LogIncident[]>([]);
+  const hiddenTransactionIds = useRef(new Set<string>());
 
   useEffect(() => {
     void api.getProxyStatus().then(setProxy);
-    void api.discoverDevices().then((items) => { setDevices(items); setDevice(items[0]?.serial ?? ""); });
+    const refreshDevices = () => {
+      void api.discoverDevices().then(items => {
+        setDevices(items);
+        setDevice(current => preferredDevice(current, items));
+      }).catch(error => setNotice(`Could not refresh Android devices: ${String(error)}`));
+    };
+    refreshDevices();
+    const deviceTimer = window.setInterval(refreshDevices, 2000);
     const stops = [
       listen<{payload: ProxyStatus}>("proxy-status-changed", e => setProxy(e.payload.payload)),
       listen<{payload: HttpTransaction}>("transaction-created", e =>
-        setTransactions(current => [e.payload.payload, ...current])),
+        setTransactions(current => hiddenTransactionIds.current.has(e.payload.payload.id)
+          ? current : [e.payload.payload, ...current])),
       listen<{payload: HttpTransaction}>("transaction-updated", e =>
         setTransactions(current => current.map(tx => tx.id === e.payload.payload.id ? e.payload.payload : tx))),
       listen<{payload: HttpTransaction}>("transaction-completed", e =>
-        setTransactions(current => current.some(tx => tx.id === e.payload.payload.id)
+        setTransactions(current => hiddenTransactionIds.current.has(e.payload.payload.id) ? current :
+          current.some(tx => tx.id === e.payload.payload.id)
           ? current.map(tx => tx.id === e.payload.payload.id ? e.payload.payload : tx)
           : [e.payload.payload, ...current])),
       listen<{payload: LogIncident}>("incident-created", e => {
@@ -78,7 +115,10 @@ export function App() {
         setNotice(`Logcat: ${incident.title} — ${incident.message}`);
       }),
     ];
-    return () => { void Promise.all(stops).then(unlisteners => unlisteners.forEach(stop => stop())); };
+    return () => {
+      window.clearInterval(deviceTimer);
+      void Promise.all(stops).then(unlisteners => unlisteners.forEach(stop => stop()));
+    };
   }, []);
   useEffect(() => {
     if (!device) return;
@@ -87,7 +127,9 @@ export function App() {
   useEffect(() => {
     if (!capturing || paused) return;
     const refresh = () => {
-      void api.listTransactions().then(setTransactions).catch(error =>
+      void api.listTransactions().then(items =>
+        setTransactions(items.filter(item => !hiddenTransactionIds.current.has(item.id)))
+      ).catch(error =>
         setNotice(`Could not refresh captured traffic: ${String(error)}`));
     };
     refresh();
@@ -102,7 +144,10 @@ export function App() {
       (!errorsOnly || displayState(tx) === "Failed" || tx.correlated_incidents.length > 0) &&
       !endpointIsExcluded(tx, activeExclusions);
   }), [transactions, query, changedOnly, errorsOnly, excludeInput, excludedEndpoints]);
-  const selected = transactions.find(tx => tx.id === selectedId) ?? visible[0];
+  const suggestions = useMemo(() => endpointSuggestions(
+    transactions.filter(tx => !endpointIsExcluded(tx, excludedEndpoints)), excludeInput
+  ), [transactions, excludeInput, excludedEndpoints]);
+  const selected = visible.find(tx => tx.id === selectedId) ?? visible[0];
   const changedCount = transactions.filter(tx => displayState(tx) === "Changed").length;
   const errorCount = transactions.filter(tx => displayState(tx) === "Failed" || tx.correlated_incidents.length > 0).length;
   const pendingCount = transactions.filter(tx => displayState(tx) === "Pending").length;
@@ -114,7 +159,11 @@ export function App() {
   async function start() {
     try {
       await api.startProxy();
-      if (device) await api.configureAndroidProxy(device, "10.0.2.2", 8080);
+      if (device) {
+        const selectedDevice = devices.find(item => item.serial === device);
+        const host = await api.getProxyHost(selectedDevice?.connection_type ?? "usb");
+        await api.configureAndroidProxy(device, host, 8080);
+      }
       if (device && packageName) await api.startLogcatCapture(device, packageName);
       setCapturing(true); setNotice("Capture active. Navigate the Android app manually.");
     } catch (error) {
@@ -123,8 +172,14 @@ export function App() {
     }
   }
   async function stop() {
-    await api.stopProxy(); setCapturing(false);
-    if (device) await api.clearAndroidProxy(device).catch(() => undefined);
+    try {
+      if (device) await api.clearAndroidProxy(device);
+      await api.stopProxy();
+      setCapturing(false); setPaused(false);
+      setNotice("Capture stopped and the Android system proxy was cleared.");
+    } catch (error) {
+      setNotice(`Could not fully stop capture: ${String(error)}`);
+    }
   }
   async function pairWithQr() {
     try {
@@ -176,10 +231,10 @@ export function App() {
     } catch (error) { setConnectionError(String(error)); setNotice(String(error)); }
     finally { setConnecting(false); }
   }
-  async function deleteAll() {
-    if (!window.confirm("Delete all captured API history? This cannot be undone.")) return;
-    try { await api.deleteAllTransactions(); setTransactions([]); setSelectedId(undefined); setIncidents([]); setNotice("All captured API history was deleted."); }
-    catch (error) { setNotice(String(error)); }
+  function deleteAll() {
+    transactions.forEach(transaction => hiddenTransactionIds.current.add(transaction.id));
+    setTransactions([]); setSelectedId(undefined); setIncidents([]);
+    setNotice("Cleared the API list from this UI session. Saved history remains available for comparisons and returns after restart.");
   }
   async function testYesterday() {
     if (!window.confirm("Replay every testable API captured yesterday? Requests may include state-changing methods. Requests containing redacted credentials or data are skipped.")) return;
@@ -220,7 +275,10 @@ export function App() {
       <button className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}><Filter/>Changed only</button>
       <button className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}><AlertCircle/>Errors only</button>
       <button title="Showing today’s captures"><CalendarDays/>Today</button>
-      {capturing ? <button onClick={()=>setPaused(v=>!v)}>{paused?<Play/>:<Pause/>}{paused?"Resume capture":"Pause capture"}</button> :
+      <button className="danger" title="Clear this UI session without deleting saved comparison history"
+        onClick={deleteAll}><Trash2/>Delete all</button>
+      {capturing ? <><button onClick={()=>setPaused(v=>!v)}>{paused?<Play/>:<Pause/>}{paused?"Resume capture":"Pause capture"}</button>
+        <button className="danger" onClick={()=>void stop()}><Square/>Stop capture</button></> :
         <button className="primary" onClick={()=>void start()}><Play/>Start capture</button>}
       <div className="metrics">
         <span>Requests<b>{transactions.length}</b></span><span>Changed<b>{changedCount}</b></span>
@@ -234,11 +292,20 @@ export function App() {
         title={`Remove ${endpoint}`} onClick={()=>setExcludedEndpoints(current=>current.filter(item=>item!==endpoint))}>
         {endpoint}<X/>
       </button>)}
+      <div className="exclude-field">
       <label className="exclude-input">
         <Search/><input aria-label="Exclude full endpoint" placeholder="Paste a full endpoint and press Enter…"
           value={excludeInput} onChange={event=>setExcludeInput(event.target.value)}
           onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();addExclusion();}}}/>
       </label>
+      {suggestions.length > 0 && <div className="exclude-options" role="listbox" aria-label="Matching endpoints">
+        {suggestions.map(endpoint => <button key={endpoint} role="option" onClick={()=>{
+          setExcludedEndpoints(current => current.some(item => item.toLowerCase() === endpoint.toLowerCase())
+            ? current : [...current, endpoint]);
+          setExcludeInput("");
+        }}>{endpoint}</button>)}
+      </div>}
+      </div>
       <button title="Add exclusion" disabled={!excludeInput.trim()} onClick={addExclusion}><SlidersHorizontal/>Exclude</button>
     </section>
     {notice && <div className="notice">{notice}</div>}

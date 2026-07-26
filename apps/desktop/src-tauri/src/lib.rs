@@ -10,6 +10,7 @@ use androidqa_core::{
 };
 use std::{
     collections::HashMap,
+    net::UdpSocket,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -28,6 +29,7 @@ struct InspectorState {
     ca_directory: std::path::PathBuf,
     qr_pairings: Mutex<HashMap<Uuid, QrPairingSecret>>,
     logcat_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    configured_device: Mutex<Option<String>>,
 }
 
 #[tauri::command]
@@ -252,22 +254,60 @@ async fn restart_proxy(state: tauri::State<'_, InspectorState>) -> Result<String
     start_proxy(state).await
 }
 #[tauri::command]
-async fn configure_android_proxy(serial: String, host: String, port: u16) -> Result<(), String> {
+async fn configure_android_proxy(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+    host: String,
+    port: u16,
+) -> Result<(), String> {
+    let configured_serial = serial.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let adb = ProcessAdb::discover().map_err(|e| e.to_string())?;
         android::configure_proxy(&adb, &serial, &host, port).map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    *state
+        .configured_device
+        .lock()
+        .map_err(|_| "device proxy lock poisoned")? = Some(configured_serial);
+    Ok(())
 }
 #[tauri::command]
-async fn clear_android_proxy(serial: String) -> Result<(), String> {
+async fn clear_android_proxy(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+) -> Result<(), String> {
+    let cleared_serial = serial.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let adb = ProcessAdb::discover().map_err(|e| e.to_string())?;
         android::clear_proxy(&adb, &serial).map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    let mut configured = state
+        .configured_device
+        .lock()
+        .map_err(|_| "device proxy lock poisoned")?;
+    if configured.as_deref() == Some(cleared_serial.as_str()) {
+        *configured = None;
+    }
+    Ok(())
+}
+#[tauri::command]
+fn get_proxy_host(connection_type: String) -> Result<String, String> {
+    if connection_type == "emulator" {
+        return Ok("10.0.2.2".into());
+    }
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .map_err(|error| format!("could not inspect the Mac network: {error}"))?;
+    socket
+        .connect("8.8.8.8:80")
+        .map_err(|error| format!("could not determine the Mac Wi-Fi address: {error}"))?;
+    match socket.local_addr().map_err(|error| error.to_string())?.ip() {
+        std::net::IpAddr::V4(address) if !address.is_loopback() => Ok(address.to_string()),
+        _ => Err("could not determine an IPv4 address reachable from the Android device".into()),
+    }
 }
 #[tauri::command]
 async fn verify_android_proxy(serial: String) -> Result<String, String> {
@@ -427,6 +467,7 @@ pub fn run() {
                 ca_directory,
                 qr_pairings: Mutex::new(HashMap::new()),
                 logcat_task: Mutex::new(None),
+                configured_device: Mutex::new(None),
             });
             Ok(())
         })
@@ -448,6 +489,7 @@ pub fn run() {
             generate_ca_certificate,
             configure_android_proxy,
             clear_android_proxy,
+            get_proxy_host,
             verify_android_proxy,
             list_transactions,
             delete_all_transactions,
@@ -455,6 +497,21 @@ pub fn run() {
             get_transaction,
             approve_baseline
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to start App Tester");
+        .build(tauri::generate_context!())
+        .expect("failed to build App Tester")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                let configured_device = app_handle
+                    .state::<InspectorState>()
+                    .configured_device
+                    .lock()
+                    .ok()
+                    .and_then(|device| device.clone());
+                if let Some(serial) = configured_device
+                    && let Ok(adb) = ProcessAdb::discover()
+                {
+                    let _ = android::clear_proxy(&adb, &serial);
+                }
+            }
+        });
 }
