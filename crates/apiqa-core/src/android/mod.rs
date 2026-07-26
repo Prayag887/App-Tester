@@ -47,7 +47,7 @@ pub fn prepare_certificate_install(
         ));
     }
     let remote_path = "/sdcard/Download/AppTester-HTTPS-CA.pem";
-    runner.push(certificate_path, remote_path)?;
+    runner.push(serial, certificate_path, remote_path)?;
     let installer_output = runner.run(&[
         "-s",
         serial,
@@ -360,7 +360,7 @@ studio-app-tester-123 _adb-tls-pairing._tcp 192.168.1.4:42891\n";
             fn run(&self, _: &[&str]) -> Result<String, DeviceError> {
                 panic!("validation should run before ADB")
             }
-            fn push(&self, _: &Path, _: &str) -> Result<String, DeviceError> {
+            fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
                 panic!("validation should run before ADB")
             }
         }
@@ -368,6 +368,34 @@ studio-app-tester-123 _adb-tls-pairing._tcp 192.168.1.4:42891\n";
         assert!(pair_with_code(&runner, "host;bad", 37123, "123456").is_err());
         assert!(pair_with_code(&runner, "192.168.1.5", 0, "123456").is_err());
         assert!(pair_with_code(&runner, "192.168.1.5", 37123, "abcdef").is_err());
+    }
+
+    #[test]
+    fn targets_certificate_transfer_to_the_selected_serial() {
+        use std::sync::Mutex;
+        struct RecordingRunner {
+            pushed_serial: Mutex<Option<String>>,
+        }
+        impl AdbRunner for RecordingRunner {
+            fn run(&self, _: &[&str]) -> Result<String, DeviceError> {
+                Ok("started".into())
+            }
+            fn push(&self, serial: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
+                *self.pushed_serial.lock().unwrap() = Some(serial.into());
+                Ok("pushed".into())
+            }
+        }
+        let certificate = std::env::temp_dir().join(format!("app-tester-{}.pem", Uuid::new_v4()));
+        std::fs::write(&certificate, "test certificate").unwrap();
+        let runner = RecordingRunner {
+            pushed_serial: Mutex::new(None),
+        };
+        prepare_certificate_install(&runner, "emulator-5554", &certificate).unwrap();
+        assert_eq!(
+            runner.pushed_serial.lock().unwrap().as_deref(),
+            Some("emulator-5554")
+        );
+        std::fs::remove_file(certificate).unwrap();
     }
 
     #[test]

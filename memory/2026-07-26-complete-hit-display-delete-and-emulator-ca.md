@@ -1,0 +1,10 @@
+# Debug report — complete hit display, Delete all, and emulator CA
+
+- **Symptom:** A USB-connected device appeared to have missing API hits, the Mac UI had no Delete all button, and the running emulator needed the App Tester CA repaired.
+- **Root cause:** Capture persistence contained the traffic, but the desktop refresh requested only the newest 250 transactions. The capture workspace redesign had left the existing `deleteAll` handler unreachable after removing its button. The emulator is a production `user` image (`ro.debuggable=0`) and refuses `adb root`, so Android requires its user-CA installer.
+- **Fix:** Fetch transaction history in 500-row pages until exhausted and restore Delete all as a UI-session-only clear that preserves SQLite history and comparison baselines. Copy the current App Tester CA to the emulator and open Android's certificate picker.
+- **Evidence:** The USB OnePlus proxy is `10.10.10.15:8080`; live Eynorix requests, including successful HTTP 200 responses, are present in SQLite. Historical sessions include 2,804 transactions, proving the old 250-row UI truncation. `cargo test --workspace` passes 26 tests; desktop Vitest and TypeScript checks pass 10 tests; the production bundle builds and the installed `/Applications/App Tester.app` is signed and running from a fresh process.
+- **Regression tests:** `apps/desktop/src/App.test.ts` verifies multi-page loading beyond 250 hits and rendering of the Delete all control.
+- **Emulator certificate:** The correct CA was copied to `/sdcard/Download/AppTester-HTTPS-CA.pem`; Android DocumentsUI is currently open awaiting selection. Final installation changes a security-sensitive trust setting and requires user confirmation immediately before UI control.
+- **Limitations:** A captured `CONNECT` without a decrypted inner request means the client rejected the CA, uses certificate pinning, QUIC/HTTP-3, or a direct socket. Eynorix application requests on the USB phone are currently decrypting successfully.
+- **Status:** DONE_WITH_CONCERNS — code, installed Mac app, and CA staging are complete; emulator CA trust awaits explicit action-time confirmation.

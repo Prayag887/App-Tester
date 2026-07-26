@@ -8,8 +8,10 @@ use androidqa_core::{
     replay::ReplaySummary,
     traffic::HttpTransaction,
 };
+use serde::Serialize;
 use std::{
     collections::HashMap,
+    net::UdpSocket,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -21,6 +23,28 @@ use tokio::{
 };
 use uuid::Uuid;
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AndroidCaState {
+    Installed,
+    NotInstalled,
+    Unknown,
+}
+
+#[derive(Debug, Serialize)]
+struct AndroidCaStatus {
+    state: AndroidCaState,
+    can_manage_automatically: bool,
+    detail: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AndroidCaChange {
+    status: AndroidCaStatus,
+    requires_user_confirmation: bool,
+    rebooting: bool,
+}
+
 struct InspectorState {
     proxy: Arc<ProxyService>,
     database: Arc<Database>,
@@ -28,6 +52,8 @@ struct InspectorState {
     ca_directory: std::path::PathBuf,
     qr_pairings: Mutex<HashMap<Uuid, QrPairingSecret>>,
     logcat_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    configured_device: Mutex<Option<String>>,
+    configured_device_path: std::path::PathBuf,
 }
 
 #[tauri::command]
@@ -136,6 +162,196 @@ async fn prepare_android_certificate_install(
     })
     .await
     .map_err(|error| format!("certificate setup task failed: {error}"))?
+}
+
+fn certificate_hash(certificate_path: &std::path::Path) -> Result<String, String> {
+    let output = std::process::Command::new("openssl")
+        .args(["x509", "-subject_hash_old", "-noout", "-in"])
+        .arg(certificate_path)
+        .output()
+        .map_err(|error| format!("could not inspect the local CA: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    String::from_utf8(output.stdout)
+        .map(|value| value.trim().to_owned())
+        .map_err(|_| "OpenSSL returned an invalid certificate hash".to_owned())
+}
+
+fn root_ca_path(certificate_path: &std::path::Path) -> Result<String, String> {
+    Ok(format!(
+        "/data/misc/user/0/cacerts-added/{}.0",
+        certificate_hash(certificate_path)?
+    ))
+}
+
+fn inspect_android_ca(
+    adb: &ProcessAdb,
+    serial: &str,
+    certificate_path: &std::path::Path,
+) -> AndroidCaStatus {
+    let Ok(path) = root_ca_path(certificate_path) else {
+        return AndroidCaStatus {
+            state: AndroidCaState::Unknown,
+            can_manage_automatically: false,
+            detail: "The local CA has not been generated yet.".into(),
+        };
+    };
+    let command = format!("test -f {path} && echo installed || echo missing");
+    match androidqa_core::AdbRunner::run(
+        adb,
+        &["-s", serial, "shell", "su", "0", "sh", "-c", &command],
+    ) {
+        Ok(output) => match parse_root_ca_probe(&output) {
+            Some(true) => AndroidCaStatus {
+                state: AndroidCaState::Installed,
+                can_manage_automatically: true,
+                detail: "App Tester CA is installed in Android's user trust store.".into(),
+            },
+            Some(false) => AndroidCaStatus {
+                state: AndroidCaState::NotInstalled,
+                can_manage_automatically: true,
+                detail: "App Tester CA is not installed on this rooted device.".into(),
+            },
+            None => protected_ca_status(),
+        },
+        Err(_) => protected_ca_status(),
+    }
+}
+
+fn parse_root_ca_probe(output: &str) -> Option<bool> {
+    match output.trim() {
+        "installed" => Some(true),
+        "missing" => Some(false),
+        _ => None,
+    }
+}
+
+fn protected_ca_status() -> AndroidCaStatus {
+    AndroidCaStatus {
+            state: AndroidCaState::Unknown,
+            can_manage_automatically: false,
+            detail: "Android protects the user CA store on this device. Installation status requires on-device confirmation.".into(),
+    }
+}
+
+#[tauri::command]
+async fn get_android_ca_status(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+    connection_type: String,
+) -> Result<AndroidCaStatus, String> {
+    let certificate_path = state.proxy.configuration().ca_certificate_path.clone();
+    if !certificate_path.exists() {
+        return Ok(AndroidCaStatus {
+            state: AndroidCaState::NotInstalled,
+            can_manage_automatically: connection_type == "emulator",
+            detail: "The App Tester CA has not been generated yet.".into(),
+        });
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        if connection_type == "emulator" {
+            let _ = androidqa_core::AdbRunner::run(&adb, &["-s", &serial, "root"]);
+            let _ = androidqa_core::AdbRunner::run(&adb, &["-s", &serial, "wait-for-device"]);
+        }
+        Ok(inspect_android_ca(&adb, &serial, &certificate_path))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn set_android_ca_usage(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+    connection_type: String,
+    use_ca: bool,
+) -> Result<AndroidCaChange, String> {
+    let certificate_path = state.proxy.configuration().ca_certificate_path.clone();
+    if !certificate_path.exists() {
+        generate_ca(&state.ca_directory).map_err(|error| error.to_string())?;
+    }
+    let certificate_path = state.proxy.configuration().ca_certificate_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        if connection_type == "emulator" {
+            androidqa_core::AdbRunner::run(&adb, &["-s", &serial, "root"])
+                .map_err(|error| error.to_string())?;
+            androidqa_core::AdbRunner::run(&adb, &["-s", &serial, "wait-for-device"])
+                .map_err(|error| error.to_string())?;
+        }
+        let current = inspect_android_ca(&adb, &serial, &certificate_path);
+        if current.can_manage_automatically {
+            let path = root_ca_path(&certificate_path)?;
+            if use_ca {
+                let temporary = "/data/local/tmp/app-tester-ca.pem";
+                androidqa_core::AdbRunner::push(&adb, &serial, &certificate_path, temporary)
+                    .map_err(|error| error.to_string())?;
+                let command = format!(
+                    "cp {temporary} {path} && chmod 644 {path} && chown system:system {path}"
+                );
+                androidqa_core::AdbRunner::run(
+                    &adb,
+                    &["-s", &serial, "shell", "su", "0", "sh", "-c", &command],
+                )
+                .map_err(|error| error.to_string())?;
+            } else {
+                let command = format!("rm -f {path}");
+                androidqa_core::AdbRunner::run(
+                    &adb,
+                    &["-s", &serial, "shell", "su", "0", "sh", "-c", &command],
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            androidqa_core::AdbRunner::run(&adb, &["-s", &serial, "reboot"])
+                .map_err(|error| error.to_string())?;
+            return Ok(AndroidCaChange {
+                status: AndroidCaStatus {
+                    state: if use_ca {
+                        AndroidCaState::Installed
+                    } else {
+                        AndroidCaState::NotInstalled
+                    },
+                    can_manage_automatically: true,
+                    detail: if use_ca {
+                        "CA installed. Android is rebooting to activate it."
+                    } else {
+                        "CA removed. Android is rebooting to apply the change."
+                    }
+                    .into(),
+                },
+                requires_user_confirmation: false,
+                rebooting: true,
+            });
+        }
+        if use_ca {
+            android::prepare_certificate_install(&adb, &serial, &certificate_path)
+                .map_err(|error| error.to_string())?;
+        } else {
+            let _ = android::clear_proxy(&adb, &serial);
+            androidqa_core::AdbRunner::run(
+                &adb,
+                &[
+                    "-s",
+                    &serial,
+                    "shell",
+                    "am",
+                    "start",
+                    "-a",
+                    "android.settings.TRUSTED_CREDENTIALS_USER",
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        Ok(AndroidCaChange {
+            status: current,
+            requires_user_confirmation: true,
+            rebooting: false,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -252,22 +468,69 @@ async fn restart_proxy(state: tauri::State<'_, InspectorState>) -> Result<String
     start_proxy(state).await
 }
 #[tauri::command]
-async fn configure_android_proxy(serial: String, host: String, port: u16) -> Result<(), String> {
+async fn configure_android_proxy(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+    host: String,
+    port: u16,
+) -> Result<(), String> {
+    let configured_serial = serial.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let adb = ProcessAdb::discover().map_err(|e| e.to_string())?;
         android::configure_proxy(&adb, &serial, &host, port).map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    if let Err(error) = std::fs::write(&state.configured_device_path, &configured_serial) {
+        if let Ok(adb) = ProcessAdb::discover() {
+            let _ = android::clear_proxy(&adb, &configured_serial);
+        }
+        return Err(format!(
+            "could not persist Android proxy ownership: {error}"
+        ));
+    }
+    *state
+        .configured_device
+        .lock()
+        .map_err(|_| "device proxy lock poisoned")? = Some(configured_serial);
+    Ok(())
 }
 #[tauri::command]
-async fn clear_android_proxy(serial: String) -> Result<(), String> {
+async fn clear_android_proxy(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+) -> Result<(), String> {
+    let cleared_serial = serial.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let adb = ProcessAdb::discover().map_err(|e| e.to_string())?;
         android::clear_proxy(&adb, &serial).map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    let mut configured = state
+        .configured_device
+        .lock()
+        .map_err(|_| "device proxy lock poisoned")?;
+    if configured.as_deref() == Some(cleared_serial.as_str()) {
+        *configured = None;
+        let _ = std::fs::remove_file(&state.configured_device_path);
+    }
+    Ok(())
+}
+#[tauri::command]
+fn get_proxy_host(connection_type: String) -> Result<String, String> {
+    if connection_type == "emulator" {
+        return Ok("10.0.2.2".into());
+    }
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .map_err(|error| format!("could not inspect the Mac network: {error}"))?;
+    socket
+        .connect("8.8.8.8:80")
+        .map_err(|error| format!("could not determine the Mac Wi-Fi address: {error}"))?;
+    match socket.local_addr().map_err(|error| error.to_string())?.ip() {
+        std::net::IpAddr::V4(address) if !address.is_loopback() => Ok(address.to_string()),
+        _ => Err("could not determine an IPv4 address reachable from the Android device".into()),
+    }
 }
 #[tauri::command]
 async fn verify_android_proxy(serial: String) -> Result<String, String> {
@@ -392,6 +655,16 @@ pub fn run() {
             let database = Arc::new(Database::open(data_dir.join("inspector.sqlite"))?);
             let events = androidqa_core::events::EventBroadcaster::default();
             let ca_directory = data_dir.join("certificate-authority");
+            let configured_device_path = data_dir.join("configured-android-proxy");
+            if let Ok(serial) = std::fs::read_to_string(&configured_device_path) {
+                let serial = serial.trim();
+                if !serial.is_empty()
+                    && let Ok(adb) = ProcessAdb::discover()
+                {
+                    let _ = android::clear_proxy(&adb, serial);
+                }
+                let _ = std::fs::remove_file(&configured_device_path);
+            }
             let proxy = Arc::new(ProxyService::new(
                 ProxyConfiguration {
                     bind_address: "0.0.0.0".into(),
@@ -427,6 +700,8 @@ pub fn run() {
                 ca_directory,
                 qr_pairings: Mutex::new(HashMap::new()),
                 logcat_task: Mutex::new(None),
+                configured_device: Mutex::new(None),
+                configured_device_path,
             });
             Ok(())
         })
@@ -439,6 +714,8 @@ pub fn run() {
             pair_with_code,
             enable_usb_wifi,
             prepare_android_certificate_install,
+            get_android_ca_status,
+            set_android_ca_usage,
             start_proxy,
             start_logcat_capture,
             stop_proxy,
@@ -448,6 +725,7 @@ pub fn run() {
             generate_ca_certificate,
             configure_android_proxy,
             clear_android_proxy,
+            get_proxy_host,
             verify_android_proxy,
             list_transactions,
             delete_all_transactions,
@@ -455,6 +733,39 @@ pub fn run() {
             get_transaction,
             approve_baseline
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to start App Tester");
+        .build(tauri::generate_context!())
+        .expect("failed to build App Tester")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                let configured_device = app_handle
+                    .state::<InspectorState>()
+                    .configured_device
+                    .lock()
+                    .ok()
+                    .and_then(|device| device.clone());
+                if let Some(serial) = configured_device
+                    && let Ok(adb) = ProcessAdb::discover()
+                {
+                    let _ = android::clear_proxy(&adb, &serial);
+                    let _ = std::fs::remove_file(
+                        &app_handle.state::<InspectorState>().configured_device_path,
+                    );
+                }
+            }
+        });
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::parse_root_ca_probe;
+
+    #[test]
+    fn rejects_shell_errors_as_proof_of_root_access() {
+        assert_eq!(parse_root_ca_probe("installed\n"), Some(true));
+        assert_eq!(parse_root_ca_probe("missing\n"), Some(false));
+        assert_eq!(
+            parse_root_ca_probe("/system/bin/sh: su: inaccessible or not found\n"),
+            None
+        );
+    }
 }
