@@ -56,6 +56,7 @@ pub struct AndroidApp {
     pub package_name: String,
     pub version_name: Option<String>,
     pub version_code: Option<u64>,
+    pub debuggable: bool,
 }
 
 #[derive(Debug, Error)]
@@ -74,7 +75,7 @@ pub enum DeviceError {
 
 pub trait AdbRunner: Send + Sync {
     fn run(&self, args: &[&str]) -> Result<String, DeviceError>;
-    fn push(&self, local: &Path, remote: &str) -> Result<String, DeviceError>;
+    fn push(&self, serial: &str, local: &Path, remote: &str) -> Result<String, DeviceError>;
 }
 
 #[derive(Debug, Clone)]
@@ -114,9 +115,9 @@ impl AdbRunner for ProcessAdb {
         String::from_utf8(output.stdout).map_err(|_| DeviceError::InvalidOutput)
     }
 
-    fn push(&self, local: &Path, remote: &str) -> Result<String, DeviceError> {
+    fn push(&self, serial: &str, local: &Path, remote: &str) -> Result<String, DeviceError> {
         let output = Command::new(&self.path)
-            .args(["push"])
+            .args(["-s", serial, "push"])
             .arg(local)
             .arg(remote)
             .output()
@@ -195,20 +196,35 @@ pub fn list_third_party_apps(
     let output = runner.run(&["-s", serial, "shell", "pm", "list", "packages", "-3"])?;
     let mut apps = parse_package_list(&output)
         .into_iter()
-        .map(|package_name| {
+        .filter_map(|package_name| {
             let details = runner
                 .run(&["-s", serial, "shell", "dumpsys", "package", &package_name])
                 .unwrap_or_default();
+            let debuggable = package_is_debuggable(&details);
+            if !debuggable {
+                return None;
+            }
             let (version_name, version_code) = parse_package_version(&details);
-            AndroidApp {
+            Some(AndroidApp {
                 package_name,
                 version_name,
                 version_code,
-            }
+                debuggable,
+            })
         })
         .collect::<Vec<_>>();
     apps.sort_by(|left, right| left.package_name.cmp(&right.package_name));
     Ok(apps)
+}
+
+fn package_is_debuggable(package_dump: &str) -> bool {
+    package_dump.lines().any(|line| {
+        let normalized = line.trim().to_ascii_uppercase();
+        normalized == "DEBUGGABLE=TRUE"
+            || normalized
+                .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+                .any(|token| token == "DEBUGGABLE")
+    })
 }
 
 pub fn launch_app(
@@ -433,6 +449,13 @@ deadbeef offline\n";
             ),
             (Some("2.4.1".to_owned()), Some(42))
         );
+        assert!(package_is_debuggable(
+            "flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA DEBUGGABLE ]"
+        ));
+        assert!(package_is_debuggable("debuggable=true"));
+        assert!(!package_is_debuggable(
+            "flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]"
+        ));
     }
 
     #[test]

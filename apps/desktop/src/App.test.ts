@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, bodyText, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, preferredDevice } from "./App";
+import { App, bodyText, compactEndpoint, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, preferredDevice } from "./App";
 import { collectTransactionPages } from "./api";
 import type { AndroidDevice, HttpTransaction } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
@@ -26,6 +26,10 @@ describe("traffic presentation", () => {
     const github = {...transaction,request:{scheme:"https",host:"api.github.com",path:"/repos"}} as HttpTransaction;
     expect(endpointSuggestions([google, github, google], "goo")).toEqual(["https://google.com/search?q=api"]);
   });
+  it("shortens excluded endpoints without losing their identifying path", () => {
+    expect(compactEndpoint("https://www.api.example.com/v1/users")).toBe("api.example/v1/users");
+    expect(compactEndpoint("http://service.dev:8080/health")).toBe("service:8080/health");
+  });
   it("discovers USB-only devices and preserves a valid explicit selection", () => {
     const usb = {serial:"oneplus",connection_type:"usb",authorization_status:"authorized"} as AndroidDevice;
     const emulator = {serial:"emulator",connection_type:"emulator",authorization_status:"authorized"} as AndroidDevice;
@@ -43,5 +47,7 @@ describe("traffic presentation", () => {
     const markup = renderToStaticMarkup(createElement(App));
     expect(markup).toContain("Delete all");
     expect(markup).toContain("without deleting saved comparison history");
+    expect(markup).toContain("Inspect logs");
+    expect(markup).toContain("Toolkit");
   });
 });

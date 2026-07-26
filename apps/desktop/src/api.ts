@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AndroidApp, AndroidCertificateInstall, AndroidDevice, HttpTransaction, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary } from "./types";
+import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, HttpTransaction, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary } from "./types";
 const native = () => "__TAURI_INTERNALS__" in window;
 export const discoverDevices = async (): Promise<AndroidDevice[]> => native() ? invoke("discover_devices") : [];
 export const listInstalledApps = async (serial: string): Promise<AndroidApp[]> => invoke("list_installed_apps", { serial });
@@ -39,3 +39,7 @@ export const enableUsbWifi = async (serial:string, port=5555):Promise<QrPairingR
   invoke("enable_usb_wifi", { serial, port });
 export const prepareAndroidCertificateInstall = async (serial:string):Promise<AndroidCertificateInstall> =>
   invoke("prepare_android_certificate_install", { serial });
+export const getAndroidCaStatus = async (serial:string, connectionType:string):Promise<AndroidCaStatus> =>
+  invoke("get_android_ca_status", { serial, connectionType });
+export const setAndroidCaUsage = async (serial:string, connectionType:string,useCa:boolean):Promise<AndroidCaChange> =>
+  invoke("set_android_ca_usage", { serial, connectionType, useCa });
