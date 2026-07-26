@@ -49,6 +49,7 @@ describe("traffic presentation", () => {
     expect(markup).toContain("without deleting saved comparison history");
     expect(markup).toContain("Inspect logs");
     expect(markup).toContain("Toolkit");
+    expect(markup).toContain("Desktop host:");
     expect(markup).not.toContain("Connect via QR");
     expect(markup).not.toContain("Pair with code");
     expect(markup).not.toContain("USB to Wi-Fi");

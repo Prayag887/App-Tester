@@ -75,7 +75,7 @@ pre{background:#101827;border-color:#2d3850;color:#cbd2e3}
 .shell{height:100vh;min-width:0;display:flex;flex-direction:column}
 .shell>header{flex:none}.screen-heading{min-height:72px;display:flex;align-items:center;gap:20px;padding:12px 18px;background:#131c2e;border-bottom:1px solid #29344b}
 .screen-heading>div{margin-right:auto}.screen-heading span{color:#9b81dc;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
-.screen-heading h1{margin:3px 0 0;font-size:20px;line-height:1.1}.screen-heading p{margin:0;color:#8f99b0}.screen-heading p b{color:#d5d9e7}
+.screen-heading h1{margin:3px 0 0;font-size:20px;line-height:1.1}.screen-heading p{margin:0;color:#8f99b0}.screen-heading p b{color:#d5d9e7}.desktop-host{display:inline-block;margin-right:12px;color:#55d7a7;font-weight:700}
 .filters,.exclude-bar,.notice{flex:none}.workspace{flex:1;min-height:0}
 .filter-chip-scroll{display:flex;gap:7px;min-width:0;max-width:42%;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 0 5px;scrollbar-width:thin}
 .filter-chip{flex:none;max-width:none}.filter-chip-scroll:empty{display:none}

@@ -86,6 +86,7 @@ export function App() {
   const [apps, setApps] = useState<AndroidApp[]>([]);
   const [appsLoading, setAppsLoading] = useState(false);
   const [packageName, setPackageName] = useState("");
+  const [desktopHost, setDesktopHost] = useState("Resolving…");
   const [notice, setNotice] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [enablingUsbWifi, setEnablingUsbWifi] = useState(false);
@@ -156,6 +157,12 @@ export function App() {
     return () => window.removeEventListener("focus", refresh);
   }, [device, devices]);
   useEffect(() => {
+    const connectionType = devices.find(item => item.serial === device)?.connection_type ?? "usb";
+    void api.getProxyHost(connectionType)
+      .then(setDesktopHost)
+      .catch(() => setDesktopHost("Unavailable"));
+  }, [device, devices]);
+  useEffect(() => {
     if (!capturing || paused) return;
     const refresh = () => {
       void api.listTransactions().then(items =>
@@ -204,6 +211,7 @@ export function App() {
       if (device) {
         const selectedDevice = devices.find(item => item.serial === device);
         const host = await api.getProxyHost(selectedDevice?.connection_type ?? "usb");
+        setDesktopHost(host);
         await api.configureAndroidProxy(device, host, 8080);
         deviceProxyConfigured = true;
       }
@@ -382,7 +390,7 @@ export function App() {
     </header>
     {screen === "toolkit" ? <><section className="screen-heading">
       <div><span>Toolkit</span><h1>API traffic</h1></div>
-      <p>Only traffic from the current <b>{packageName || "selected package"}</b> capture is shown.</p>
+      <p><span className="desktop-host">Desktop host: {desktopHost}</span>Only traffic from the current <b>{packageName || "selected package"}</b> capture is shown.</p>
     </section>
     <section className="filters">
       <label className="search"><Search/><input placeholder="Search method, host, path, status…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
