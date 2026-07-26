@@ -84,6 +84,7 @@ export function App() {
   const [devices, setDevices] = useState<AndroidDevice[]>([]);
   const [device, setDevice] = useState("");
   const [apps, setApps] = useState<AndroidApp[]>([]);
+  const [appsLoading, setAppsLoading] = useState(false);
   const [packageName, setPackageName] = useState("");
   const [notice, setNotice] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -133,12 +134,14 @@ export function App() {
   }, []);
   useEffect(() => {
     if (!device) return;
+    setAppsLoading(true);
     void api.listInstalledApps(device).then(items => {
       const devApps = items.filter(item => item.debuggable);
       setApps(devApps);
       setPackageName(current => devApps.some(item => item.package_name === current)
         ? current : devApps[0]?.package_name ?? "");
-    });
+    }).catch(error => setNotice(`Could not load debuggable packages: ${String(error)}`))
+      .finally(() => setAppsLoading(false));
   }, [device]);
   useEffect(() => {
     if (!device) { setCaStatus(undefined); return; }
@@ -183,10 +186,11 @@ export function App() {
     ? Math.round(completedDurations.reduce((sum, value) => sum + value, 0) / completedDurations.length)
     : 0;
 
-  async function start() {
+  async function start(packageOverride?: string) {
+    const capturePackage = packageOverride ?? packageName;
     let deviceProxyConfigured = false;
     try {
-      if (!packageName) {
+      if (!capturePackage) {
         setNotice("Select a debuggable package before starting capture.");
         return;
       }
@@ -201,7 +205,7 @@ export function App() {
         await api.configureAndroidProxy(device, host, 8080);
         deviceProxyConfigured = true;
       }
-      if (device && packageName) await api.startLogcatCapture(device, packageName);
+      if (device) await api.startLogcatCapture(device, capturePackage);
       setCapturing(true); setNotice("Capture active. Navigate the Android app manually.");
     } catch (error) {
       if (deviceProxyConfigured && device) {
@@ -223,6 +227,22 @@ export function App() {
         : "Capture stopped and the Android system proxy was cleared.");
     } finally {
       setCapturing(false); setPaused(false);
+    }
+  }
+  async function selectPackage(nextPackage: string) {
+    if (nextPackage === packageName) return;
+    setConnecting(true);
+    try {
+      if (capturing) {
+        await stop();
+      }
+      setPackageName(nextPackage);
+      if (capturing && nextPackage) {
+        await start(nextPackage);
+        setNotice(`Capture switched to ${nextPackage}.`);
+      }
+    } finally {
+      setConnecting(false);
     }
   }
   async function setupHttpsCapture() {
@@ -308,8 +328,10 @@ export function App() {
         onClick={()=>void changeCaUsage(true)}><ShieldCheck/>{caChanging ? "Checking…" : "Use CA"}</button>
       <button disabled={caChanging || !device || caStatus?.state === "not_installed"}
         onClick={()=>void changeCaUsage(false)}><X/>Don’t use CA</button>
-      <select aria-label="Package" value={packageName} disabled={capturing} onChange={e=>setPackageName(e.target.value)}>
-        <option value="">Select dev package</option>{apps.map(app=><option key={app.package_name}>{app.package_name}</option>)}
+      <select aria-label="Package" value={packageName} disabled={appsLoading || connecting}
+        onChange={e=>void selectPackage(e.target.value)}>
+        <option value="">{appsLoading ? "Loading dev packages…" : "Select dev package"}</option>
+        {apps.map(app=><option key={app.package_name}>{app.package_name}</option>)}
       </select>
       <button title="Settings"><Settings/></button>
     </header>

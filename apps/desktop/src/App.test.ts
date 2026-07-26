@@ -52,6 +52,8 @@ describe("traffic presentation", () => {
     expect(markup).not.toContain("Connect via QR");
     expect(markup).not.toContain("Pair with code");
     expect(markup).not.toContain("USB to Wi-Fi");
+    expect(markup).toContain('<select aria-label="Package"');
+    expect(markup).not.toContain('<select aria-label="Package" disabled');
   });
   it("shows an application frame as the incident location with a Logcat fallback", () => {
     const incident = {first_app_frame:"at com.example.Home.load(Home.kt:42)",lines:[
