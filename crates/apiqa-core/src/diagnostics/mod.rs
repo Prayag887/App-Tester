@@ -8,6 +8,8 @@ use uuid::Uuid;
 pub enum IncidentCategory {
     Crash,
     Anr,
+    Error,
+    Warning,
     DtoParsing,
     StrictMode,
     Database,
@@ -143,17 +145,24 @@ pub fn parse_incident(
     package: &str,
     lines: Vec<FocusedLogLine>,
 ) -> Option<LogIncident> {
-    let root = lines
-        .iter()
-        .find_map(|line| classify(&line.message).map(|match_| (line, match_)))?;
+    let (root, category, title) = lines.iter().find_map(|line| {
+        if let Some((category, title)) = classify(&line.message) {
+            return Some((line, category, title));
+        }
+        match line.level.as_str() {
+            "E" | "F" | "A" => Some((line, IncidentCategory::Error, "Error")),
+            "W" => Some((line, IncidentCategory::Warning, "Warning")),
+            _ => None,
+        }
+    })?;
     let frame = first_application_frame(&lines, package);
     Some(LogIncident {
         id: Uuid::new_v4(),
         session_id,
-        category: root.1.0,
-        signature: normalize_signature(root.1.0, &root.0.message, frame.as_deref()),
-        title: root.1.1.into(),
-        message: root.0.message.clone(),
+        category,
+        signature: normalize_signature(category, &root.message, frame.as_deref()),
+        title: title.into(),
+        message: root.message.clone(),
         first_app_frame: frame,
         lines,
         occurrence_count: 1,
@@ -193,6 +202,41 @@ mod tests {
         assert_eq!(
             classify(&line.message).unwrap().0,
             IncidentCategory::Network
+        );
+    }
+
+    #[test]
+    fn includes_unclassified_errors_and_warnings_but_drops_normal_logs() {
+        let session_id = Uuid::new_v4();
+        let line = |level: &str, message: &str| FocusedLogLine {
+            timestamp_ms: 1,
+            level: level.into(),
+            tag: "Example".into(),
+            message: message.into(),
+        };
+        assert_eq!(
+            parse_incident(
+                session_id,
+                "dev.example",
+                vec![line("E", "request rejected")]
+            )
+            .unwrap()
+            .category,
+            IncidentCategory::Error
+        );
+        assert_eq!(
+            parse_incident(session_id, "dev.example", vec![line("W", "slow operation")])
+                .unwrap()
+                .category,
+            IncidentCategory::Warning
+        );
+        assert!(
+            parse_incident(
+                session_id,
+                "dev.example",
+                vec![line("I", "request completed")]
+            )
+            .is_none()
         );
     }
 }

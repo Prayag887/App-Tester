@@ -154,9 +154,6 @@ fn difference(
     }
 }
 fn diff_value(previous: &Value, current: &Value, path: &str, out: &mut Vec<Difference>) {
-    if previous == current {
-        return;
-    }
     if std::mem::discriminant(previous) != std::mem::discriminant(current) {
         let kind = if previous.is_null() || current.is_null() {
             DifferenceKind::NullabilityChanged
@@ -204,28 +201,15 @@ fn diff_value(previous: &Value, current: &Value, path: &str, out: &mut Vec<Diffe
             }
         }
         (Value::Array(before), Value::Array(after)) => {
-            if before.len() != after.len() {
-                out.push(difference(
-                    DifferenceKind::ArrayLengthChanged,
-                    path,
-                    Some(previous),
-                    Some(current),
-                    DifferenceSeverity::Warning,
-                    format!("Array length changed: {} → {}", before.len(), after.len()),
-                ));
-            }
-            for (index, (left, right)) in before.iter().zip(after).enumerate() {
-                diff_value(left, right, &format!("{path}[{index}]"), out);
+            // DTO compatibility is about the shape of an array item, not how many
+            // records happened to be returned or the values in each record.
+            if let (Some(left), Some(right)) = (before.first(), after.first()) {
+                diff_value(left, right, &format!("{path}[]"), out);
             }
         }
-        _ => out.push(difference(
-            DifferenceKind::ValueChanged,
-            path,
-            Some(previous),
-            Some(current),
-            DifferenceSeverity::Warning,
-            "Value changed".into(),
-        )),
+        // Scalar values are deliberately ignored. A different id, timestamp, or
+        // count cannot cause a DTO parser failure when its JSON type is unchanged.
+        _ => {}
     }
 }
 
@@ -284,6 +268,51 @@ mod tests {
             differences
                 .iter()
                 .any(|d| d.kind == DifferenceKind::FieldRemoved)
+        );
+    }
+
+    #[test]
+    fn ignores_scalar_values_and_array_lengths() {
+        let differences = compare_json(
+            &serde_json::json!({
+                "status": "ok",
+                "count": 18,
+                "items": [{"id": "17", "title": "Old"}, {"id": "18", "title": "Other"}]
+            }),
+            &serde_json::json!({
+                "status": "success",
+                "count": 200,
+                "items": [{"id": "99", "title": "New"}]
+            }),
+            &ComparisonRules::default(),
+        );
+        assert!(differences.is_empty());
+    }
+
+    #[test]
+    fn compares_array_item_keys_without_using_item_values() {
+        let differences = compare_json(
+            &serde_json::json!({"items": [{"id": "17", "title": "Old"}]}),
+            &serde_json::json!({"items": [{"id": "99", "slug": "new"}]}),
+            &ComparisonRules::default(),
+        );
+        assert!(
+            differences
+                .iter()
+                .any(|d| d.kind == DifferenceKind::FieldRemoved
+                    && d.path.as_deref() == Some("$.items[].title"))
+        );
+        assert!(
+            differences
+                .iter()
+                .any(|d| d.kind == DifferenceKind::FieldAdded
+                    && d.path.as_deref() == Some("$.items[].slug"))
+        );
+        assert!(
+            !differences
+                .iter()
+                .any(|d| d.kind == DifferenceKind::ValueChanged
+                    || d.kind == DifferenceKind::ArrayLengthChanged)
         );
     }
 }

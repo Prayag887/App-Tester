@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Activity, Cable, Circle, Copy, KeyRound, Pause, Play, QrCode, Search, Settings, ShieldCheck, Square, TestTube2, Trash2, Wifi, X } from "lucide-react";
+import { Activity, AlertCircle, Cable, CalendarDays, Circle, Copy, Filter, KeyRound, Pause, Play, QrCode, Search, Settings, ShieldCheck, SlidersHorizontal, Wifi, X } from "lucide-react";
 import * as api from "./api";
 import type { AndroidApp, AndroidCertificateInstall, AndroidDevice, BodyStorage, HttpTransaction, LogIncident, ProxyStatus, QrPairingChallenge } from "./types";
 
@@ -20,6 +20,12 @@ export const displayState = (tx: HttpTransaction) => {
   if (tx.comparison?.differences.some((difference) => !difference.ignored)) return "Changed";
   return "Unchanged";
 };
+export const fullEndpoint = (tx: HttpTransaction) =>
+  `${tx.request.scheme}://${tx.request.host}${tx.request.path}`;
+export const endpointIsExcluded = (tx: HttpTransaction, exclusions: string[]) => {
+  const endpoint = fullEndpoint(tx).trim().toLowerCase();
+  return exclusions.some(value => value.trim().toLowerCase() === endpoint);
+};
 const jsonView = (value: string) => {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
 };
@@ -33,6 +39,8 @@ export function App() {
   const [query, setQuery] = useState("");
   const [changedOnly, setChangedOnly] = useState(false);
   const [errorsOnly, setErrorsOnly] = useState(false);
+  const [excludeInput, setExcludeInput] = useState("");
+  const [excludedEndpoints, setExcludedEndpoints] = useState<string[]>([]);
   const [tab, setTab] = useState<InspectorTab>("Overview");
   const [devices, setDevices] = useState<AndroidDevice[]>([]);
   const [device, setDevice] = useState("");
@@ -76,13 +84,32 @@ export function App() {
     if (!device) return;
     void api.listInstalledApps(device).then(items => { setApps(items); setPackageName(items[0]?.package_name ?? ""); });
   }, [device]);
+  useEffect(() => {
+    if (!capturing || paused) return;
+    const refresh = () => {
+      void api.listTransactions().then(setTransactions).catch(error =>
+        setNotice(`Could not refresh captured traffic: ${String(error)}`));
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 750);
+    return () => window.clearInterval(timer);
+  }, [capturing, paused]);
 
   const visible = useMemo(() => transactions.filter(tx => {
     const haystack = `${tx.request.method} ${tx.request.host} ${tx.request.path} ${tx.response?.status ?? ""}`.toLowerCase();
+    const activeExclusions = excludeInput.trim() ? [...excludedEndpoints, excludeInput] : excludedEndpoints;
     return haystack.includes(query.toLowerCase()) && (!changedOnly || displayState(tx) === "Changed") &&
-      (!errorsOnly || displayState(tx) === "Failed" || tx.correlated_incidents.length > 0);
-  }), [transactions, query, changedOnly, errorsOnly]);
+      (!errorsOnly || displayState(tx) === "Failed" || tx.correlated_incidents.length > 0) &&
+      !endpointIsExcluded(tx, activeExclusions);
+  }), [transactions, query, changedOnly, errorsOnly, excludeInput, excludedEndpoints]);
   const selected = transactions.find(tx => tx.id === selectedId) ?? visible[0];
+  const changedCount = transactions.filter(tx => displayState(tx) === "Changed").length;
+  const errorCount = transactions.filter(tx => displayState(tx) === "Failed" || tx.correlated_incidents.length > 0).length;
+  const pendingCount = transactions.filter(tx => displayState(tx) === "Pending").length;
+  const completedDurations = transactions.map(duration).filter((value): value is number => value != null);
+  const averageDuration = completedDurations.length
+    ? Math.round(completedDurations.reduce((sum, value) => sum + value, 0) / completedDurations.length)
+    : 0;
 
   async function start() {
     try {
@@ -164,11 +191,18 @@ export function App() {
     finally { setConnecting(false); }
   }
   function copy(value: string) { void navigator.clipboard.writeText(value); setNotice("Copied to clipboard"); }
+  function addExclusion() {
+    const value = excludeInput.trim();
+    if (!value) return;
+    setExcludedEndpoints(current => current.some(item => item.toLowerCase() === value.toLowerCase())
+      ? current : [...current, value]);
+    setExcludeInput("");
+  }
 
   return <main className="shell">
     <header>
-      <div className="brand"><Activity/><strong>App Tester</strong><span>Android Inspector</span></div>
-      <div className={`proxy ${proxy}`}><Circle/>Proxy {proxy.replaceAll("_"," ")}</div>
+      <div className="window-controls" aria-hidden="true"><i/><i/><i/></div>
+      <div className={`proxy ${proxy}`}><Circle/>{proxy === "running" ? "Connected · Capturing automatically" : `Proxy ${proxy.replaceAll("_"," ")}`}</div>
       <select aria-label="Device" value={device} onChange={e=>setDevice(e.target.value)}>
         <option value="">Select device</option>{devices.map(item=><option key={item.serial}>{item.serial}</option>)}
       </select>
@@ -179,22 +213,38 @@ export function App() {
       <select aria-label="Package" value={packageName} onChange={e=>setPackageName(e.target.value)}>
         <option value="">Select package</option>{apps.map(app=><option key={app.package_name}>{app.package_name}</option>)}
       </select>
-      {capturing ? <button className="danger" onClick={()=>void stop()}><Square/>Stop capture</button> :
-        <button className="primary" onClick={()=>void start()}><Play/>Start capture</button>}
       <button title="Settings"><Settings/></button>
     </header>
     <section className="filters">
       <label className="search"><Search/><input placeholder="Search method, host, path, status…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
-      <button className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}>Changed only</button>
-      <button className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}>Errors only</button>
-      <button disabled={connecting} onClick={()=>void testYesterday()}><TestTube2/>Test yesterday’s APIs</button>
-      <button className="danger" onClick={()=>void deleteAll()}><Trash2/>Delete all</button>
-      <button onClick={()=>setPaused(v=>!v)}>{paused?<Play/>:<Pause/>}{paused?"Resume":"Pause"} UI</button>
-      <span className="count">{visible.length} requests</span>
+      <button className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}><Filter/>Changed only</button>
+      <button className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}><AlertCircle/>Errors only</button>
+      <button title="Showing today’s captures"><CalendarDays/>Today</button>
+      {capturing ? <button onClick={()=>setPaused(v=>!v)}>{paused?<Play/>:<Pause/>}{paused?"Resume capture":"Pause capture"}</button> :
+        <button className="primary" onClick={()=>void start()}><Play/>Start capture</button>}
+      <div className="metrics">
+        <span>Requests<b>{transactions.length}</b></span><span>Changed<b>{changedCount}</b></span>
+        <span>Errors<b className="metric-error">{errorCount}</b></span><span>Pending<b>{pendingCount}</b></span>
+        <span>Avg duration<b>{averageDuration} ms</b></span>
+      </div>
+    </section>
+    <section className="exclude-bar">
+      <span>Exclude APIs (negative filter)</span>
+      {excludedEndpoints.map(endpoint => <button className="filter-chip" key={endpoint}
+        title={`Remove ${endpoint}`} onClick={()=>setExcludedEndpoints(current=>current.filter(item=>item!==endpoint))}>
+        {endpoint}<X/>
+      </button>)}
+      <label className="exclude-input">
+        <Search/><input aria-label="Exclude full endpoint" placeholder="Paste a full endpoint and press Enter…"
+          value={excludeInput} onChange={event=>setExcludeInput(event.target.value)}
+          onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();addExclusion();}}}/>
+      </label>
+      <button title="Add exclusion" disabled={!excludeInput.trim()} onClick={addExclusion}><SlidersHorizontal/>Exclude</button>
     </section>
     {notice && <div className="notice">{notice}</div>}
     <section className="workspace">
       <div className="traffic">
+        <div className="cache-alert"><AlertCircle/><span><b>Schema comparison</b> · Changes are detected from JSON keys and types, not values.</span></div>
         <div className="table-head"><span>Time</span><span>Method</span><span>Host / Path</span><span>Status</span><span>Duration</span><span>Size</span><span>Change</span><span>Issues</span></div>
         <div className="rows">
           {visible.map(tx => <button key={tx.id} onClick={()=>setSelectedId(tx.id)}
@@ -286,14 +336,15 @@ function Message({headers,body,onCopy}:{headers:{name:string;value:string}[];bod
     <h3>Body <button onClick={()=>onCopy(body)}><Copy/>Copy raw</button></h3><pre>{jsonView(body) || "No body"}</pre></>;
 }
 function Code({value,onCopy}:{value:string;onCopy:(v:string)=>void}) { return <div className="code"><button onClick={()=>onCopy(value)}><Copy/>Copy</button><pre>{value}</pre></div>; }
-function Compare({tx}:{tx:HttpTransaction}) { const diffs=tx.comparison?.differences ?? []; return <div>
-  <h3>{diffs.length ? `${diffs.length} differences` : "No compatible comparison available"}</h3>
+function Compare({tx}:{tx:HttpTransaction}) { const diffs=tx.comparison?.differences ?? []; return <div className="compare-panel">
+  <div className="compare-toolbar"><div><b>DTO schema comparison</b><span>Values and array lengths are ignored</span></div><span className="compare-mode">Key structure</span></div>
+  <h3>{diffs.length ? `${diffs.length} schema differences` : tx.comparison?.baseline_transaction_id ? "DTO shape unchanged" : "No compatible comparison available"}</h3>
   {diffs.map((diff,i)=><article className={`diff ${diff.severity}`} key={i}><b>{diff.path ?? diff.kind}</b><span>{diff.explanation}</span>
     <pre>Previous: {diff.previous ?? "—"}{"\n"}Current: {diff.current ?? "—"}</pre></article>)}</div>; }
 function Logs({incidents}:{incidents:LogIncident[]}) { return incidents.length ? <div className="logs">{incidents.map(incident =>
   <article className="log-incident" key={incident.id}><b>{incident.title}</b><span>{incident.message}</span>
     {incident.lines.map((line, index)=><pre key={index}>{line.level} {line.tag}: {line.message}</pre>)}</article>)}</div> :
-  <div className="empty compact">No actionable logcat errors captured for the selected app yet.</div>; }
+  <div className="empty compact">No errors, warnings, or actionable issues captured for the selected app yet.</div>; }
 function Timeline({tx}:{tx:HttpTransaction}) { return <ol className="timeline">
   <li>Request started <time>{new Date(tx.timing.request_started_ms).toLocaleTimeString()}</time></li>
   {tx.timing.request_complete_ms&&<li>Request complete</li>}{tx.timing.response_started_ms&&<li>Response headers</li>}

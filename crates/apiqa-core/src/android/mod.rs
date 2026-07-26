@@ -266,13 +266,41 @@ pub fn app_uid(
     serial: &str,
     package_name: &str,
 ) -> Result<u32, DeviceError> {
+    if let Ok(output) = runner.run(&[
+        "-s",
+        serial,
+        "shell",
+        "cmd",
+        "package",
+        "list",
+        "packages",
+        "-U",
+        package_name,
+    ]) && let Some(uid) = parse_package_list_uid(&output, package_name)
+    {
+        return Ok(uid);
+    }
     let output = runner.run(&["-s", serial, "shell", "dumpsys", "package", package_name])?;
-    let expression = Regex::new(r"(?m)^\s*userId=(\d+)\s*$").expect("valid package UID regex");
+    parse_app_uid(&output)
+        .ok_or_else(|| DeviceError::Adb(format!("could not determine UID for {package_name}")))
+}
+
+fn parse_package_list_uid(output: &str, package_name: &str) -> Option<u32> {
+    output.lines().find_map(|line| {
+        let (package, uid) = line.trim().strip_prefix("package:")?.split_once(" uid:")?;
+        (package == package_name)
+            .then(|| uid.trim().parse().ok())
+            .flatten()
+    })
+}
+
+fn parse_app_uid(package_dump: &str) -> Option<u32> {
+    let expression =
+        Regex::new(r"(?m)^\s*(?:userId|appId)\s*=\s*(\d+)\b").expect("valid package UID regex");
     expression
-        .captures(&output)
+        .captures(package_dump)
         .and_then(|captures| captures.get(1))
         .and_then(|uid| uid.as_str().parse().ok())
-        .ok_or_else(|| DeviceError::Adb(format!("could not determine UID for {package_name}")))
 }
 
 #[cfg(test)]
@@ -345,15 +373,23 @@ studio-app-tester-123 _adb-tls-pairing._tcp 192.168.1.4:42891\n";
     #[test]
     fn extracts_app_uid_from_package_dump() {
         let output = "Packages:\n  Package [dev.example.app]:\n    userId=10129\n";
-        let expression = Regex::new(r"(?m)^\s*userId=(\d+)\s*$").unwrap();
+        assert_eq!(parse_app_uid(output), Some(10129));
+    }
+
+    #[test]
+    fn extracts_app_uid_when_android_appends_package_fields() {
+        let output =
+            "Packages:\n  Package [com.yajtech.eynorixdev]:\n    userId=10231 gids=[3003]\n";
+        assert_eq!(parse_app_uid(output), Some(10231));
+    }
+
+    #[test]
+    fn extracts_uid_from_modern_package_manager_output() {
+        let output = "package:com.yajtech.eynorixdev uid:10228\n";
         assert_eq!(
-            expression
-                .captures(output)
-                .unwrap()
-                .get(1)
-                .unwrap()
-                .as_str(),
-            "10129"
+            parse_package_list_uid(output, "com.yajtech.eynorixdev"),
+            Some(10228)
         );
+        assert_eq!(parse_app_uid("    appId=10228\n"), Some(10228));
     }
 }
