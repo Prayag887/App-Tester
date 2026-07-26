@@ -101,13 +101,15 @@ pub fn enable_usb_wifi(
             "ADB Wi-Fi port must be between 1 and 65535".into(),
         ));
     }
-    runner.run(&["-s", serial, "tcpip", &port.to_string()])?;
     let routes = runner.run(&["-s", serial, "shell", "ip", "route"])?;
     let host = parse_wifi_ipv4(&routes).ok_or_else(|| {
         DeviceError::Adb(
             "could not determine the device Wi-Fi address; connect manually using its IP".into(),
         )
     })?;
+    // `adb tcpip` intentionally tears down the USB transport. Resolve the device address
+    // first, while the selected serial is still reachable.
+    runner.run(&["-s", serial, "tcpip", &port.to_string()])?;
     let endpoint = format!("{host}:{port}");
     let output = runner.run(&["connect", &endpoint])?;
     if !output.to_ascii_lowercase().contains("connected") {
@@ -351,6 +353,44 @@ studio-app-tester-123 _adb-tls-pairing._tcp 192.168.1.4:42891\n";
             Some("192.168.1.44".into())
         );
         assert_eq!(parse_wifi_ipv4("unreachable 127.0.0.0/8"), None);
+    }
+
+    #[test]
+    fn resolves_the_wifi_address_before_switching_adb_off_usb() {
+        use std::sync::Mutex;
+
+        struct RecordingRunner {
+            commands: Mutex<Vec<Vec<String>>>,
+        }
+        impl AdbRunner for RecordingRunner {
+            fn run(&self, args: &[&str]) -> Result<String, DeviceError> {
+                self.commands
+                    .lock()
+                    .unwrap()
+                    .push(args.iter().map(|arg| (*arg).to_owned()).collect());
+                if args.ends_with(&["shell", "ip", "route"]) {
+                    Ok("10.10.10.0/24 dev wlan0 proto kernel scope link src 10.10.10.19".into())
+                } else {
+                    Ok("connected to 10.10.10.19:5555".into())
+                }
+            }
+            fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
+                unreachable!("USB-to-Wi-Fi does not transfer a file")
+            }
+        }
+
+        let runner = RecordingRunner { commands: Mutex::new(Vec::new()) };
+        let result = enable_usb_wifi(&runner, "JFR8T8YDFI9955MB", 5555).unwrap();
+
+        assert_eq!(result.endpoint, "10.10.10.19:5555");
+        assert_eq!(
+            *runner.commands.lock().unwrap(),
+            vec![
+                vec!["-s", "JFR8T8YDFI9955MB", "shell", "ip", "route"],
+                vec!["-s", "JFR8T8YDFI9955MB", "tcpip", "5555"],
+                vec!["connect", "10.10.10.19:5555"],
+            ]
+        );
     }
 
     #[test]
