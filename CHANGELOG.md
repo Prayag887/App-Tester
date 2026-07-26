@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.1] - 2026-07-26
+
+### Added
+
+- Dark indigo traffic-inspector interface with capture metrics and clearer comparison status.
+- Exact full-endpoint negative filtering with removable exclusion chips.
+- Broader Android logcat error and warning correlation scoped to the selected app UID.
+
+### Changed
+
+- Response comparisons now report JSON key, type, and nullability changes while ignoring scalar values and array lengths.
+- Android package UID detection now supports modern package-manager output and additional package dump formats.
+
 ## [0.1.0] - 2026-07-23
 
 ### Added
