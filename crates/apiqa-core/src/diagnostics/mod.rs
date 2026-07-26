@@ -35,7 +35,13 @@ pub struct LogIncident {
     pub signature: String,
     pub title: String,
     pub message: String,
+    /// A user-facing explanation of what failed and why, rather than a raw log line.
+    pub summary: String,
+    /// The most specific causal exception found in the captured error burst.
+    pub root_cause: Option<String>,
     pub first_app_frame: Option<String>,
+    /// Android activity that was in the foreground while the incident occurred.
+    pub foreground_activity: Option<String>,
     pub lines: Vec<FocusedLogLine>,
     pub occurrence_count: u32,
     #[serde(with = "time::serde::rfc3339")]
@@ -107,7 +113,7 @@ pub fn classify(message: &str) -> Option<(IncidentCategory, &'static str)> {
         (
             IncidentCategory::Network,
             "Network failure",
-            r"(?i)UnknownHostException|ConnectException|SocketTimeoutException|SSLHandshakeException",
+            r"(?i)UnknownHostException|ConnectException|SocketTimeoutException|SSLHandshakeException|CertPathValidatorException|CertificateException|Trust anchor",
         ),
     ];
     patterns.into_iter().find_map(|(category, title, pattern)| {
@@ -116,6 +122,46 @@ pub fn classify(message: &str) -> Option<(IncidentCategory, &'static str)> {
             .is_match(message)
             .then_some((category, title))
     })
+}
+
+fn causal_exception(lines: &[FocusedLogLine]) -> Option<String> {
+    lines
+        .iter()
+        .rev()
+        .map(|line| line.message.trim())
+        .find(|message| {
+            (message.contains("Caused by:") || message.contains("Exception"))
+                && !message.starts_with("at ")
+        })
+        .map(str::to_owned)
+}
+
+fn human_summary(category: IncidentCategory, root: &str, cause: Option<&str>) -> String {
+    let combined = format!("{root}\n{}", cause.unwrap_or(""));
+    if combined
+        .to_ascii_lowercase()
+        .contains("trust anchor for certification path not found")
+    {
+        return "The app could not establish a trusted HTTPS connection because Android does not trust the server certificate chain. This commonly happens when a proxy or self-signed certificate has not been installed or allowed for this app.".into();
+    }
+    match category {
+        IncidentCategory::Network => "A network request failed before the app received a response. Review the root cause and the screen context to identify the affected call.".into(),
+        IncidentCategory::Crash => "The app hit an unrecovered exception and crashed. The root cause below identifies the failing code path.".into(),
+        IncidentCategory::Anr => "The app stopped responding long enough for Android to report an ANR. The screen context shows where the user was when it happened.".into(),
+        _ => format!("The app reported: {root}"),
+    }
+}
+
+fn human_title(default_title: &str, root: &str, cause: Option<&str>) -> String {
+    let combined = format!("{root}\n{}", cause.unwrap_or(""));
+    if combined
+        .to_ascii_lowercase()
+        .contains("trust anchor for certification path not found")
+    {
+        "TLS certificate not trusted".into()
+    } else {
+        default_title.into()
+    }
 }
 
 pub fn normalize_signature(
@@ -144,6 +190,7 @@ pub fn parse_incident(
     session_id: Uuid,
     package: &str,
     lines: Vec<FocusedLogLine>,
+    foreground_activity: Option<String>,
 ) -> Option<LogIncident> {
     let (root, category, title) = lines.iter().find_map(|line| {
         if let Some((category, title)) = classify(&line.message) {
@@ -156,14 +203,18 @@ pub fn parse_incident(
         }
     })?;
     let frame = first_application_frame(&lines, package);
+    let cause = causal_exception(&lines);
     Some(LogIncident {
         id: Uuid::new_v4(),
         session_id,
         category,
         signature: normalize_signature(category, &root.message, frame.as_deref()),
-        title: title.into(),
+        title: human_title(title, &root.message, cause.as_deref()),
         message: root.message.clone(),
+        summary: human_summary(category, &root.message, cause.as_deref()),
+        root_cause: cause,
         first_app_frame: frame,
+        foreground_activity,
         lines,
         occurrence_count: 1,
         occurred_at: OffsetDateTime::now_utc(),
@@ -218,25 +269,56 @@ mod tests {
             parse_incident(
                 session_id,
                 "dev.example",
-                vec![line("E", "request rejected")]
+                vec![line("E", "request rejected")],
+                None
             )
             .unwrap()
             .category,
             IncidentCategory::Error
         );
         assert_eq!(
-            parse_incident(session_id, "dev.example", vec![line("W", "slow operation")])
-                .unwrap()
-                .category,
+            parse_incident(
+                session_id,
+                "dev.example",
+                vec![line("W", "slow operation")],
+                None
+            )
+            .unwrap()
+            .category,
             IncidentCategory::Warning
         );
         assert!(
             parse_incident(
                 session_id,
                 "dev.example",
-                vec![line("I", "request completed")]
+                vec![line("I", "request completed")],
+                None
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn explains_untrusted_tls_certificates_in_plain_language() {
+        let line = |message: &str| FocusedLogLine {
+            timestamp_ms: 1,
+            level: "E".into(),
+            tag: "TRuntime".into(),
+            message: message.into(),
+        };
+        let incident = parse_incident(Uuid::new_v4(), "com.example", vec![
+            line("javax.net.ssl.SSLHandshakeException: Handshake failed"),
+            line("Caused by: java.security.cert.CertPathValidatorException: Trust anchor for certification path not found."),
+        ], Some("com.example/.CheckoutActivity".into())).unwrap();
+        assert_eq!(incident.title, "TLS certificate not trusted");
+        assert!(
+            incident
+                .summary
+                .contains("does not trust the server certificate chain")
+        );
+        assert_eq!(
+            incident.foreground_activity.as_deref(),
+            Some("com.example/.CheckoutActivity")
         );
     }
 }

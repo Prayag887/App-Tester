@@ -287,6 +287,15 @@ pub fn app_uid(
         .ok_or_else(|| DeviceError::Adb(format!("could not determine UID for {package_name}")))
 }
 
+/// Extracts the foreground activity component from `dumpsys window` or activity output.
+pub fn parse_foreground_activity(output: &str, package_name: &str) -> Option<String> {
+    let expression = Regex::new(&format!(r"{}\/[^\s}}]+", regex::escape(package_name)))
+        .expect("valid foreground activity regex");
+    expression
+        .find(output)
+        .map(|matched| matched.as_str().to_owned())
+}
+
 fn parse_package_list_uid(output: &str, package_name: &str) -> Option<u32> {
     output.lines().find_map(|line| {
         let (package, uid) = line.trim().strip_prefix("package:")?.split_once(" uid:")?;
@@ -331,6 +340,18 @@ mod tests {
         assert_eq!(challenge.id, secret.id);
         assert!(challenge.qr_svg.contains("<svg"));
         assert!(!challenge.qr_svg.contains(&secret.password));
+    }
+
+    #[test]
+    fn parses_foreground_activity_for_target_package() {
+        assert_eq!(
+            parse_foreground_activity(
+                "mCurrentFocus=Window{abc u0 com.example/.CheckoutActivity}",
+                "com.example"
+            )
+            .as_deref(),
+            Some("com.example/.CheckoutActivity")
+        );
     }
 
     #[test]
@@ -379,7 +400,9 @@ studio-app-tester-123 _adb-tls-pairing._tcp 192.168.1.4:42891\n";
             }
         }
 
-        let runner = RecordingRunner { commands: Mutex::new(Vec::new()) };
+        let runner = RecordingRunner {
+            commands: Mutex::new(Vec::new()),
+        };
         let result = enable_usb_wifi(&runner, "JFR8T8YDFI9955MB", 5555).unwrap();
 
         assert_eq!(result.endpoint, "10.10.10.19:5555");

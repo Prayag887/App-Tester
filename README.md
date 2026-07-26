@@ -9,6 +9,7 @@ It does not tap, swipe, crawl screens, choose actions, or download AI models.
 - `crates/apiqa-core`: Android discovery, Hudsucker proxy, local CA, redaction, cURL generation, response comparison, diagnostics, correlation, SQLite, and typed events.
 - `apps/desktop/src-tauri`: application lifecycle and explicit commands.
 - `apps/desktop`: React view state and the live inspector.
+- `apps/companion`: Flutter Android device-owner companion that clears a stale desktop proxy when the desktop is unavailable.
 - `apps/cli`: Rust-only device discovery utility.
 
 Core capture and analysis runs in Rust. The UI displays state, filters traffic, requests actions, and copies already-redacted values.
@@ -19,6 +20,8 @@ Devices can connect through USB, an existing wireless ADB connection, or the **C
 
 Requirements: Rust 1.86+, pnpm, Android Platform Tools, and a connected Android device or emulator.
 
+Building the desktop installer also requires Flutter because it embeds the companion APK used by the same-Wi-Fi QR install flow.
+
 ```bash
 pnpm install
 cargo test --workspace
@@ -26,7 +29,11 @@ pnpm --dir apps/desktop check
 pnpm --dir apps/desktop tauri dev
 ```
 
+For a production-style local bundle, run `pnpm build`. It builds the companion APK first, then includes it in the desktop application.
+
 See [proxy setup](docs/proxy-setup.md), [Android certificate setup](docs/android-certificate-setup.md), and [known limitations](docs/known-limitations.md) before capturing HTTPS traffic.
+
+The optional Android companion has its own [setup and validation guide](apps/companion/README.md). It is for dedicated development devices provisioned as Android device owners.
 
 ## Privacy
 

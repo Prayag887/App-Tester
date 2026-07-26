@@ -30,7 +30,7 @@ describe("traffic presentation", () => {
     expect(compactEndpoint("https://www.api.example.com/v1/users")).toBe("api.example/v1/users");
     expect(compactEndpoint("http://service.dev:8080/health")).toBe("service:8080/health");
   });
-  it("discovers USB-only devices and preserves a valid explicit selection", () => {
+  it("prefers a USB device while preserving a valid explicit selection", () => {
     const usb = {serial:"oneplus",connection_type:"usb",authorization_status:"authorized"} as AndroidDevice;
     const emulator = {serial:"emulator",connection_type:"emulator",authorization_status:"authorized"} as AndroidDevice;
     expect(preferredDevice("", [emulator, usb])).toBe("oneplus");
@@ -56,10 +56,10 @@ describe("traffic presentation", () => {
     expect(markup).not.toContain('<select aria-label="Package" disabled');
   });
   it("shows an application frame as the incident location with a Logcat fallback", () => {
-    const incident = {first_app_frame:"at com.example.Home.load(Home.kt:42)",lines:[
+    const incident = {first_app_frame:"at com.example.Home.load(Home.kt:42)",foreground_activity:"com.example/.HomeActivity",lines:[
       {tag:"Home",level:"E",message:"failed",timestamp_ms:1},
     ]} as LogIncident;
-    expect(incidentLocation(incident, "com.example")).toBe("at com.example.Home.load(Home.kt:42)");
-    expect(incidentLocation({...incident,first_app_frame:undefined}, "com.example")).toBe("Home · Logcat");
+    expect(incidentLocation(incident, "com.example")).toBe("com.example/.HomeActivity");
+    expect(incidentLocation({...incident,first_app_frame:undefined,foreground_activity:undefined}, "com.example")).toBe("Home · Logcat");
   });
 });

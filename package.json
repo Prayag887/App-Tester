@@ -5,8 +5,11 @@
   "packageManager": "pnpm@11.5.2",
   "scripts": {
     "dev": "pnpm --dir apps/desktop tauri dev",
-    "build": "pnpm --dir apps/desktop tauri build",
-    "check": "cargo test --workspace && pnpm --dir apps/desktop check && pnpm --dir apps/desktop build",
+    "companion:check": "cd apps/companion && flutter analyze && flutter test",
+    "companion:build": "cd apps/companion && flutter build apk --release",
+    "desktop:build": "pnpm --dir apps/desktop tauri build",
+    "build": "pnpm run companion:build && pnpm run desktop:build",
+    "check": "pnpm run companion:check && pnpm run companion:build && cargo test --workspace && pnpm --dir apps/desktop check",
     "format": "cargo fmt --all && pnpm --dir apps/desktop format"
   }
 }

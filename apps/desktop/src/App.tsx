@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Activity, AlertCircle, CalendarDays, Circle, Copy, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Wifi, X } from "lucide-react";
 import * as api from "./api";
-import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, HttpTransaction, LogIncident, ProxyStatus } from "./types";
+import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, CompanionInstall, HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
 type InspectorTab = "Overview" | "Request" | "Response" | "Compare" | "cURL" | "Logs" | "Timeline";
 type Screen = "toolkit" | "logs";
@@ -63,7 +63,7 @@ export const preferredDevice = (current: string, devices: AndroidDevice[]) => {
     devices.find(device => device.authorization_status === "authorized")?.serial ?? "";
 };
 export const incidentLocation = (incident: LogIncident, packageName: string) =>
-  incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
+  incident.foreground_activity ?? incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
 const jsonView = (value: string) => {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
 };
@@ -90,6 +90,7 @@ export function App() {
   const [connecting, setConnecting] = useState(false);
   const [enablingUsbWifi, setEnablingUsbWifi] = useState(false);
   const [certificateInstall, setCertificateInstall] = useState<AndroidCertificateInstall>();
+  const [companionInstall, setCompanionInstall] = useState<CompanionInstall>();
   const [caStatus, setCaStatus] = useState<AndroidCaStatus>();
   const [caChanging, setCaChanging] = useState(false);
   const [incidents, setIncidents] = useState<LogIncident[]>([]);
@@ -124,7 +125,7 @@ export function App() {
       listen<{payload: LogIncident}>("incident-created", e => {
         const incident = e.payload.payload;
         setIncidents(current => [incident, ...current].slice(0, 100));
-        setNotice(`Logcat: ${incident.title} — ${incident.message}`);
+        setNotice(`Logcat: ${incident.title} — ${incident.summary}`);
       }),
     ];
     return () => {
@@ -243,6 +244,13 @@ export function App() {
       setEnablingUsbWifi(false);
     }
   }
+  async function openCompanionInstall() {
+    try {
+      setCompanionInstall(await api.prepareCompanionInstall());
+    } catch (error) {
+      setNotice(`Could not prepare the companion installer: ${String(error)}`);
+    }
+  }
   async function selectPackage(nextPackage: string) {
     if (nextPackage === packageName) return;
     setConnecting(true);
@@ -342,6 +350,9 @@ export function App() {
         onClick={()=>void switchUsbToWifi()}>
         <Wifi/>{enablingUsbWifi ? "Enabling Wi-Fi…" : "USB to Wi-Fi"}
       </button>}
+      <button title="Install the Android companion from a phone on this Wi-Fi" onClick={()=>void openCompanionInstall()}>
+        <ShieldCheck/>Install companion
+      </button>
       <div className={`ca-state ${caStatus?.state ?? "unknown"}`} title={caStatus?.detail ?? "Select a device to inspect CA status"}>
         <ShieldCheck/><span>CA {caStatus?.state.replace("_"," ") ?? "unknown"}</span>
       </div>
@@ -443,6 +454,15 @@ export function App() {
         <button className="primary submit" onClick={()=>{setCertificateInstall(undefined); void start();}}>I installed it — start capture</button>
       </section>
     </div>}
+    {companionInstall && <div className="modal-backdrop" role="presentation">
+      <section className="qr-dialog connection-dialog" role="dialog" aria-modal="true" aria-labelledby="companion-title">
+        <button className="close" aria-label="Close" onClick={()=>setCompanionInstall(undefined)}><X/></button>
+        <div className="qr-heading"><ShieldCheck/><div><h2 id="companion-title">Install App Tester Companion</h2><p>Same Wi-Fi required</p></div></div>
+        <div className="qr-image" dangerouslySetInnerHTML={{__html:companionInstall.qr_svg}} />
+        <ol><li>Connect the phone and this Mac to the same Wi-Fi network.</li><li>Scan this code with the phone camera and download the APK.</li><li>Allow this browser to install unknown apps, then open the companion.</li></ol>
+        <p className="warning">The link expires at {new Date(companionInstall.expires_at).toLocaleTimeString()}. Install only from this App Tester window.</p>
+      </section>
+    </div>}
   </section></main>;
 }
 function Overview({tx}:{tx:HttpTransaction}) { return <div className="overview">
@@ -484,8 +504,9 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
       <article><span>Warnings</span><strong>{warnings}</strong><small>Potential problems</small></article>
       <article><span>Package</span><b>{packageName || "Not selected"}</b><small>{capturing ? "Monitoring live" : "Capture stopped"}</small></article>
       {latest && <article className="issue-overview">
-        <div><span>Latest issue · How it happened</span><strong>{latest.title}</strong><p>{latest.message}</p></div>
-        <div><span>Where detected</span><code>{incidentLocation(latest, packageName)}</code>
+        <div><span>Latest issue · How it happened</span><strong>{latest.title}</strong><p>{latest.summary}</p>
+          {latest.root_cause && <small>Root cause: {latest.root_cause}</small>}</div>
+        <div><span>Screen &amp; navigation context</span><code>{incidentLocation(latest, packageName)}</code>
           <small>{new Date(latest.occurred_at).toLocaleString()}</small></div>
       </article>}
     </div>
@@ -493,9 +514,10 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
       {incidents.map(incident => <article className="log-card" key={incident.id}>
         <div className="log-severity"><AlertCircle/><span>{incident.category.replaceAll("_"," ")}</span></div>
         <div className="log-content">
-          <div className="log-title"><div><h2>{incident.title}</h2><p>{incident.message}</p></div>
+          <div className="log-title"><div><h2>{incident.title}</h2><p>{incident.summary}</p>
+            {incident.root_cause && <small>Root cause: {incident.root_cause}</small>}</div>
             <time>{new Date(incident.occurred_at).toLocaleTimeString()}</time></div>
-          <div className="detected-at"><span>Detected at</span>
+          <div className="detected-at"><span>Screen &amp; navigation context</span>
             <code>{incidentLocation(incident, packageName)}</code></div>
           <details><summary>View {incident.lines.length} captured log {incident.lines.length === 1 ? "line" : "lines"}</summary>
             {incident.lines.map((line,index)=><pre key={index}>{line.level} {line.tag}: {line.message}</pre>)}</details>

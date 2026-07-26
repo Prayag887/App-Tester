@@ -132,6 +132,71 @@ fn redact_body(bytes: &[u8], content_type: Option<&str>) -> Vec<u8> {
     redact_json(&mut value);
     serde_json::to_vec(&value).unwrap_or_default()
 }
+
+/// API payloads are normally small enough to retain for inspection.  Downloads are not:
+/// collecting one before returning the response back-pressures the client until the whole file
+/// has been read.  In particular, this made the locally served companion APK unreliable while
+/// the Android device was configured to use the capture proxy.
+fn should_stream_response(headers: &hudsucker::hyper::HeaderMap, preview_limit: usize) -> bool {
+    headers
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        .is_some_and(|length| length > preview_limit)
+        || headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.eq_ignore_ascii_case("application/vnd.android.package-archive")
+            })
+}
+
+fn record_streamed_response(
+    handler: &mut CaptureHandler,
+    status: hudsucker::hyper::StatusCode,
+    headers_map: &hudsucker::hyper::HeaderMap,
+    response_version: hudsucker::hyper::Version,
+) {
+    let Some(id) = handler.current_id else {
+        return;
+    };
+    let Some(mut transaction) = handler.transactions.get_mut(&id) else {
+        return;
+    };
+    let now = OffsetDateTime::now_utc();
+    let content_type = headers_map
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let content_length = headers_map
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    transaction.response = Some(CapturedResponse {
+        status: status.as_u16(),
+        reason: status.canonical_reason().map(str::to_owned),
+        headers: redact_headers(&headers(headers_map)),
+        body: BodyStorage::Truncated {
+            preview: Vec::new(),
+            original_size: content_length,
+        },
+        content_type,
+        decoded_size: content_length.unwrap_or_default(),
+        encoded_size: content_length.unwrap_or_default(),
+        http_version: version(response_version),
+    });
+    transaction.state = TransactionState::ResponseComplete;
+    transaction.capture_quality = CaptureQuality::PreviewOnly;
+    transaction.updated_at = now;
+    transaction.timing.response_started_ms = Some(now.unix_timestamp_nanos() as i64 / 1_000_000);
+    transaction.timing.response_complete_ms = transaction.timing.response_started_ms;
+    let completed = transaction.clone();
+    let _ = handler.database.upsert_transaction(&completed);
+    handler
+        .events
+        .send(InspectorEvent::TransactionCompleted(completed));
+}
+
 impl HttpHandler for CaptureHandler {
     async fn handle_request(
         &mut self,
@@ -247,6 +312,10 @@ impl HttpHandler for CaptureHandler {
         response: Response<Body>,
     ) -> Response<Body> {
         let (parts, body) = response.into_parts();
+        if should_stream_response(&parts.headers, self.preview_limit) {
+            record_streamed_response(self, parts.status, &parts.headers, parts.version);
+            return Response::from_parts(parts, body);
+        }
         let bytes = match body.collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(_) => return Response::from_parts(parts, Body::empty()),
@@ -458,6 +527,25 @@ impl ProxyService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streams_large_or_apk_responses_without_buffering_them() {
+        let mut large = hudsucker::hyper::HeaderMap::new();
+        large.insert("content-length", "1048577".parse().unwrap());
+        assert!(should_stream_response(&large, 1024 * 1024));
+
+        let mut apk = hudsucker::hyper::HeaderMap::new();
+        apk.insert(
+            "content-type",
+            "application/vnd.android.package-archive".parse().unwrap(),
+        );
+        assert!(should_stream_response(&apk, 1024 * 1024));
+
+        let mut small = hudsucker::hyper::HeaderMap::new();
+        small.insert("content-length", "1024".parse().unwrap());
+        assert!(!should_stream_response(&small, 1024 * 1024));
+    }
+
     #[test]
     fn ca_generation_writes_restricted_key() {
         let root = std::env::temp_dir().join(format!("app-tester-ca-{}", Uuid::new_v4()));
