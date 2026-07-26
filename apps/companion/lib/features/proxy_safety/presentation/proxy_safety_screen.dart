@@ -16,18 +16,21 @@ class ProxySafetyScreen extends StatefulWidget {
 class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
   late final TextEditingController _host;
   late final TextEditingController _port;
+  late final TextEditingController _package;
 
   @override
   void initState() {
     super.initState();
     _host = TextEditingController();
     _port = TextEditingController(text: '8080');
+    _package = TextEditingController();
   }
 
   @override
   void dispose() {
     _host.dispose();
     _port.dispose();
+    _package.dispose();
     super.dispose();
   }
 
@@ -39,7 +42,8 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
           final status = model.status;
           if (status?.host != null && _host.text.isEmpty) _host.text = status!.host!;
           if (status?.port != null && _port.text == '8080') _port.text = '${status!.port}';
-          final active = status?.isMonitoring == true;
+          if (status?.targetPackage != null && _package.text.isEmpty) _package.text = status!.targetPackage!;
+          final active = status?.isVpnActive == true;
           return Scaffold(
             body: SafeArea(
               child: ListView(
@@ -53,7 +57,7 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
                   const SizedBox(height: 4),
                   const Text('Use the green Desktop host shown in the App Tester desktop header.'),
                   const SizedBox(height: 16),
-                  _EndpointFields(host: _host, port: _port),
+                  _EndpointFields(host: _host, port: _port, targetPackage: _package),
                   if (model.error != null) ...[
                     const SizedBox(height: 12),
                     _InlineMessage(message: model.error!, isError: true),
@@ -64,14 +68,14 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
                     onPressed: model.isWorking
                         ? null
                         : () => active
-                            ? model.stopMonitoring()
-                            : model.startMonitoring(_host.text, _port.text),
+                            ? model.stopVpn()
+                            : model.startVpn(_host.text, _port.text, _package.text),
                     icon: Icon(active ? Icons.stop_circle_outlined : Icons.play_circle_outline),
                     label: Text(model.isWorking
                         ? 'Updating connection…'
                         : active
-                            ? 'Stop desktop link'
-                            : 'Monitor desktop link'),
+                            ? 'Stop VPN capture'
+                            : 'Start VPN capture'),
                   ),
                   const SizedBox(height: 12),
                   const _PermissionNote(),
@@ -127,15 +131,20 @@ class _ConnectionCard extends StatelessWidget {
 }
 
 class _EndpointFields extends StatelessWidget {
-  const _EndpointFields({required this.host, required this.port});
+  const _EndpointFields({required this.host, required this.port, required this.targetPackage});
   final TextEditingController host;
   final TextEditingController port;
+  final TextEditingController targetPackage;
 
   @override
-  Widget build(BuildContext context) => Row(children: [
-        Expanded(flex: 3, child: TextField(controller: host, keyboardType: TextInputType.url, decoration: const InputDecoration(labelText: 'Desktop host', hintText: '192.168.1.24', prefixIcon: Icon(Icons.computer_outlined)))),
-        const SizedBox(width: 12),
-        Expanded(flex: 2, child: TextField(controller: port, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Port', prefixIcon: Icon(Icons.settings_ethernet)))),
+  Widget build(BuildContext context) => Column(children: [
+        Row(children: [
+          Expanded(flex: 3, child: TextField(controller: host, keyboardType: TextInputType.url, decoration: const InputDecoration(labelText: 'Desktop host', hintText: '192.168.1.24', prefixIcon: Icon(Icons.computer_outlined)))),
+          const SizedBox(width: 12),
+          Expanded(flex: 2, child: TextField(controller: port, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Port', prefixIcon: Icon(Icons.settings_ethernet)))),
+        ]),
+        const SizedBox(height: 12),
+        TextField(controller: targetPackage, autocorrect: false, decoration: const InputDecoration(labelText: 'Selected package', hintText: 'com.example.app', prefixIcon: Icon(Icons.apps_outlined))),
       ]);
 }
 
@@ -143,7 +152,7 @@ class _PermissionNote extends StatelessWidget {
   const _PermissionNote();
   @override
   Widget build(BuildContext context) => const _InlineMessage(
-        message: 'No device-owner or administrator permission is required. Android will only show a standard VPN consent screen when the production VPN relay is enabled.',
+        message: 'No device-owner or administrator permission is required. Android asks for its standard VPN consent once, and only the selected package is routed through the capture relay.',
       );
 }
 

@@ -35,9 +35,25 @@ class ProxySafetyViewModel extends ChangeNotifier {
     _syncRefreshTimer();
   }
 
+  Future<void> startVpn(String host, String portText, String targetPackage) async {
+    final port = int.tryParse(portText);
+    if (host.trim().isEmpty || port == null || port < 1 || port > 65535 || targetPackage.trim().isEmpty) {
+      error = 'Enter a desktop host, a port from 1 to 65535, and the selected package.';
+      notifyListeners();
+      return;
+    }
+    await _run(() => _repository.startVpn(host: host.trim(), port: port, targetPackage: targetPackage.trim()));
+    _syncRefreshTimer();
+  }
+
+  Future<void> stopVpn() async {
+    await _run(_repository.stopVpn);
+    _syncRefreshTimer();
+  }
+
   void _syncRefreshTimer() {
     _refreshTimer?.cancel();
-    if (status?.isMonitoring != true) return;
+    if (status?.isMonitoring != true && status?.isVpnActive != true) return;
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 5),
       (_) => _run(_repository.status),

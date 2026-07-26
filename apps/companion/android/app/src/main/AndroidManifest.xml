@@ -2,6 +2,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <application android:label="App Tester Companion" android:allowBackup="false" android:usesCleartextTraffic="true">
         <meta-data android:name="flutterEmbedding" android:value="2" />
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:theme="@style/LaunchTheme">
@@ -11,5 +12,11 @@
             </intent-filter>
         </activity>
         <service android:name=".ProxySafetyService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <service android:name=".CaptureVpnService" android:permission="android.permission.BIND_VPN_SERVICE" android:exported="false" android:foregroundServiceType="specialUse">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Per-app local capture relay to a user-selected desktop development proxy." />
+        </service>
     </application>
 </manifest>

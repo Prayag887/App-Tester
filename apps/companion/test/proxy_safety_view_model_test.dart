@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 class FakeRepository implements ProxySafetyRepository {
   ProxySafetyStatus current =
-      const ProxySafetyStatus(isMonitoring: false);
+      const ProxySafetyStatus(isMonitoring: false, isVpnActive: false);
   String? armedHost;
   int? armedPort;
 
@@ -14,12 +14,20 @@ class FakeRepository implements ProxySafetyRepository {
     armedHost = host;
     armedPort = port;
     return current = ProxySafetyStatus(
-        isMonitoring: true, host: host, port: port);
+        isMonitoring: true, isVpnActive: false, host: host, port: port);
   }
 
   @override
   Future<ProxySafetyStatus> stopMonitoring() async =>
-      current = const ProxySafetyStatus(isMonitoring: false);
+      current = const ProxySafetyStatus(isMonitoring: false, isVpnActive: false);
+
+  @override
+  Future<ProxySafetyStatus> startVpn({required String host, required int port, required String targetPackage}) async =>
+      current = ProxySafetyStatus(isMonitoring: false, isVpnActive: true, host: host, port: port, targetPackage: targetPackage);
+
+  @override
+  Future<ProxySafetyStatus> stopVpn() async =>
+      current = const ProxySafetyStatus(isMonitoring: false, isVpnActive: false);
 
   @override
   Future<ProxySafetyStatus> status() async => current;

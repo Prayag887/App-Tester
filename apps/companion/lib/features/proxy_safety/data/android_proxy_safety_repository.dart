@@ -15,6 +15,13 @@ class AndroidProxySafetyRepository implements ProxySafetyRepository {
   @override
   Future<ProxySafetyStatus> stopMonitoring() => _invoke('stopMonitoring');
 
+  @override
+  Future<ProxySafetyStatus> startVpn({required String host, required int port, required String targetPackage}) =>
+      _invoke('startVpn', {'host': host, 'port': port, 'targetPackage': targetPackage});
+
+  @override
+  Future<ProxySafetyStatus> stopVpn() => _invoke('stopVpn');
+
   Future<ProxySafetyStatus> _invoke(String method, [Object? arguments]) async {
     final result =
         await _channel.invokeMethod<Map<Object?, Object?>>(method, arguments);

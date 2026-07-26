@@ -9,7 +9,7 @@ It does not tap, swipe, crawl screens, choose actions, or download AI models.
 - `crates/apiqa-core`: Android discovery, Hudsucker proxy, local CA, redaction, cURL generation, response comparison, diagnostics, correlation, SQLite, and typed events.
 - `apps/desktop/src-tauri`: application lifecycle and explicit commands.
 - `apps/desktop`: React view state and the live inspector.
-- `apps/companion`: Flutter Android companion with desktop-link health monitoring and in-app activity logs. It does not require device-owner enrollment.
+- `apps/companion`: Flutter Android companion with a per-selected-app VPN capture relay, automatic fail-open recovery, and in-app activity logs. It does not require device-owner enrollment.
 - `apps/cli`: Rust-only device discovery utility.
 
 Core capture and analysis runs in Rust. The UI displays state, filters traffic, requests actions, and copies already-redacted values.

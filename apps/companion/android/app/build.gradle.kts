@@ -45,6 +45,15 @@ android {
     }
 }
 
+tasks.register<Exec>("buildVpnEngine") {
+    workingDir(rootProject.projectDir.parentFile.resolve("vpn_engine"))
+    commandLine("bash", "build-android.sh")
+    inputs.dir(rootProject.projectDir.parentFile.resolve("vpn_engine"))
+    outputs.dir(projectDir.resolve("src/main/jniLibs"))
+}
+
+tasks.named("preBuild").configure { dependsOn("buildVpnEngine") }
+
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)
 }
