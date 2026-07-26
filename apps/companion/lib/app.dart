@@ -32,8 +32,14 @@ class _CompanionAppState extends State<CompanionApp> {
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xff6954a3),
+            seedColor: const Color(0xff2be0a7),
             brightness: Brightness.dark,
+          ),
+          scaffoldBackgroundColor: const Color(0xff07101f),
+          cardTheme: const CardThemeData(
+            color: Color(0xff0d1d35),
+            elevation: 0,
+            margin: EdgeInsets.zero,
           ),
           useMaterial3: true,
         ),

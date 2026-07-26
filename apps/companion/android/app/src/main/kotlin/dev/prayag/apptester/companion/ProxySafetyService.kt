@@ -33,13 +33,16 @@ class ProxySafetyService : Service() {
         val connected = runCatching {
             Socket().use { socket -> socket.connect(InetSocketAddress(endpoint.first, endpoint.second), CONNECT_TIMEOUT_MS) }
         }.isSuccess
+        val controller = ProxySafetyController(this)
         if (connected) {
             failures = 0
+            controller.record("Desktop endpoint is reachable.")
             return
         }
         failures += 1
         if (failures >= MAX_FAILURES) {
-            ProxySafetyController(this).disarm("Desktop proxy became unreachable. The companion restored direct networking.")
+            controller.record("Desktop endpoint is unreachable. Direct networking is not modified.")
+            controller.stopMonitoring("Desktop endpoint is unavailable. Monitoring stopped safely.")
             stopSelf()
         }
     }
@@ -48,9 +51,9 @@ class ProxySafetyService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Proxy safety", NotificationManager.IMPORTANCE_LOW))
         return android.app.Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("App Tester protected capture")
-            .setContentText("Restores direct networking if the desktop proxy disappears.")
-            .setSmallIcon(android.R.drawable.stat_sys_warning)
+            .setContentTitle("App Tester desktop link")
+            .setContentText("Monitoring the configured desktop endpoint.")
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
             .setOngoing(true)
             .build()
     }

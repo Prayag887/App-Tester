@@ -1,52 +1,33 @@
 # App Tester Companion
 
-The companion protects a development device from a stale App Tester proxy. It is an Android device-owner application: when capture is armed, it applies the desktop proxy and runs a foreground health monitor. If the desktop proxy cannot be reached three times, it clears the proxy and direct networking resumes.
+The companion is a regular Android application: it does not request device-owner, device-admin, accessibility, or root access. It provides a branded desktop-link screen and a persistent activity log so a person can verify that the desktop endpoint is reachable before starting a desktop capture.
 
-## Why this is a companion
+## What it does today
 
-The desktop application cannot clear an Android proxy after the desktop has crashed, powered off, or lost access to the device. Android only permits an app to manage a global proxy when it is the **device owner**. The companion uses that authority only for the proxy lifecycle.
+1. Accepts the **Desktop host** displayed in green by the desktop App Tester capture header.
+2. Monitors that endpoint in a foreground service and records health events in the app.
+3. Stops monitoring safely when the desktop endpoint is unreachable. It never modifies the phone's global network settings.
 
-It is intentionally not a packet-inspecting VPN. Android VPNs must forward every packet themselves; a partial implementation would risk blackholing traffic. This companion keeps the existing desktop proxy capture model and makes its device-side lifecycle fail open.
+## What a production fail-open capture needs
 
-## Setup
+Android does not permit a normal app to set or clear the global HTTP proxy. A production implementation therefore needs a complete `VpnService` packet-forwarding engine (TUN/TCP/UDP/DNS handling) which routes traffic to the desktop capture proxy while it is available and returns it directly when it is not. It uses Android's ordinary, user-approved VPN consent prompt—not device-owner enrollment.
 
-Use a dedicated development device. Device-owner provisioning changes how Android manages the device and normally requires a newly provisioned or factory-reset device.
+This repository intentionally does not claim to provide that relay until that packet-forwarding engine is included and independently tested. A partial `VpnService` implementation can blackhole device traffic, which is worse than the failure it is meant to solve.
 
-1. Build and install this app on the development device.
-2. Provision it as the device owner using your organization’s Android Enterprise / test-device process.
-3. Open the companion and enter the Mac's LAN address and App Tester proxy port (normally `8080`).
-4. Start **protected capture**. The companion applies the proxy and shows a persistent notification.
-5. Start the desktop capture. Keep the phone and Mac on a network where the phone can reach the Mac.
+## Build and validate
 
-If the Mac disappears, the companion attempts three TCP connections at five-second intervals and then clears the proxy. The worst-case recovery interval is about 15 seconds plus Android scheduling overhead.
-
-## Development
-
-```bash
+```sh
 cd apps/companion
 flutter pub get
 flutter analyze
 flutter test
-flutter build apk --debug
+flutter build apk --release
 ```
 
-If `android/local.properties` is not created by Flutter, add one containing `flutter.sdk=/absolute/path/to/flutter`.
+Release signing remains required. Create the ignored `android/signing.properties` locally with the keystore values described by the Android build error.
 
-The release APK is signed with a local release key that is never committed. Before the first build, create `android/signing.properties` and the matching `.jks` file:
+## Structure
 
-```properties
-storeFile=app-tester-release.jks
-storePassword=your-keystore-password
-keyAlias=app-tester-companion
-keyPassword=your-key-password
-```
-
-Keep both files private. A release key makes the APK a stable, attributable build, but Android still requires a user opt-in to install an app obtained outside a trusted store. That confirmation cannot be bypassed safely by a QR link.
-
-The package is feature-first:
-
-- `lib/features/proxy_safety/data`: Android channel and repository contract.
-- `lib/features/proxy_safety/presentation`: view model and declarative UI.
-- `android/...`: device-owner proxy controller and foreground health service.
-
-The Flutter layer never touches Android policy APIs directly; the native controller is the only platform authority boundary.
+- `lib/features/proxy_safety/`: desktop-link state, repository, view model, and screen.
+- `lib/shared/brand/`: the code-native App Tester mark shared visually with desktop branding.
+- `android/...`: foreground endpoint monitor and Flutter method channel.

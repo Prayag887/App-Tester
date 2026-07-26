@@ -9,11 +9,11 @@ class AndroidProxySafetyRepository implements ProxySafetyRepository {
   Future<ProxySafetyStatus> status() => _invoke('status');
 
   @override
-  Future<ProxySafetyStatus> arm({required String host, required int port}) =>
-      _invoke('arm', {'host': host, 'port': port});
+  Future<ProxySafetyStatus> startMonitoring({required String host, required int port}) =>
+      _invoke('startMonitoring', {'host': host, 'port': port});
 
   @override
-  Future<ProxySafetyStatus> disarm() => _invoke('disarm');
+  Future<ProxySafetyStatus> stopMonitoring() => _invoke('stopMonitoring');
 
   Future<ProxySafetyStatus> _invoke(String method, [Object? arguments]) async {
     final result =

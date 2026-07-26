@@ -1,5 +1,5 @@
 name: app_tester_companion
-description: Device-owned Android proxy safety companion for App Tester.
+description: Android desktop-link companion for App Tester.
 publish_to: none
 version: 0.1.0+1
 

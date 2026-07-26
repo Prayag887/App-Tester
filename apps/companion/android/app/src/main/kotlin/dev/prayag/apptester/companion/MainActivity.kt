@@ -13,12 +13,12 @@ class MainActivity : FlutterActivity() {
                 try {
                     val status = when (call.method) {
                         "status" -> controller.status()
-                        "arm" -> {
+                        "startMonitoring" -> {
                             val host = call.argument<String>("host") ?: error("Desktop host is required.")
                             val port = call.argument<Int>("port") ?: error("Proxy port is required.")
-                            controller.arm(host, port)
+                            controller.startMonitoring(host, port)
                         }
-                        "disarm" -> controller.disarm()
+                        "stopMonitoring" -> controller.stopMonitoring()
                         else -> {
                             result.notImplemented()
                             return@setMethodCallHandler
@@ -27,8 +27,6 @@ class MainActivity : FlutterActivity() {
                     result.success(status.asMap())
                 } catch (error: IllegalArgumentException) {
                     result.error("invalid_configuration", error.message, null)
-                } catch (error: SecurityException) {
-                    result.error("device_owner_required", error.message, null)
                 }
             }
     }
