@@ -18,9 +18,6 @@ header select{height:38px;background:#222c43}
 header button{height:38px;white-space:nowrap}
 .ca-state{height:38px;display:flex;align-items:center;gap:6px;padding:0 9px;border:1px solid #35415b;border-radius:8px;background:#1a2439;color:#9ba6bc;white-space:nowrap;text-transform:capitalize}
 .ca-state.installed{border-color:#315a4d;background:#182d28;color:#86dfbd}.ca-state.not_installed{border-color:#67444a;background:#302229;color:#f4a4a8}
-.window-controls{display:flex;gap:10px;padding-right:14px;border-right:1px solid #344057}
-.window-controls i{width:14px;height:14px;border-radius:50%;background:#ff6d70}
-.window-controls i:nth-child(2){background:#ffbf4f}.window-controls i:nth-child(3){background:#65d67a}
 .proxy{margin-right:auto;color:#99e2c4;white-space:nowrap}.proxy.running{color:#8de1bd}
 .primary{background:#67569b;border-color:#8673bd}.primary:hover{background:#7562ab}
 .filters{padding:10px 16px;gap:10px;background:#151e31;border-color:#2a354c}
@@ -91,8 +88,11 @@ pre{background:#101827;border-color:#2d3850;color:#cbd2e3}
 .log-summary article>span,.log-summary small{color:#8792a9}.log-summary strong{font-size:27px;line-height:1.1;margin:6px 0;color:#e9ecf5}
 .log-summary article>b{margin:8px 0 5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e9ecf5}
 .log-summary article.error strong{color:#ff8086}
-.log-list{min-height:0;overflow:auto;display:grid;align-content:start;gap:10px;padding:16px 18px 30px}
-.log-card{display:grid;grid-template-columns:150px minmax(0,1fr);border:1px solid #303b55;border-radius:9px;background:#161f33;overflow:hidden}
+.log-summary .issue-overview{grid-column:1/-1;min-height:0;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,1fr);gap:24px;justify-content:initial}
+.issue-overview>div{min-width:0;display:flex;flex-direction:column;gap:6px}.issue-overview strong{font-size:15px;margin:0}.issue-overview p{margin:0;color:#b7bfd0;overflow-wrap:anywhere}
+.issue-overview code{color:#c9b8f2;overflow-wrap:anywhere}.issue-overview small{display:block}
+.log-list{min-height:0;flex:1;overflow:auto;display:grid;grid-auto-rows:max-content;align-content:start;gap:10px;padding:16px 18px 30px}
+.log-card{min-height:132px;display:grid;grid-template-columns:150px minmax(0,1fr);border:1px solid #303b55;border-radius:9px;background:#161f33;overflow:hidden}
 .log-severity{display:flex;align-items:flex-start;gap:8px;padding:17px 14px;background:#251e2d;color:#ff9298;text-transform:capitalize;font-weight:700}
 .log-severity svg{margin-top:1px}.log-content{min-width:0;padding:15px 17px}.log-title{display:flex;justify-content:space-between;gap:20px}
 .log-title h2{font-size:15px;margin:0 0 6px}.log-title p{margin:0;color:#b7bfd0;overflow-wrap:anywhere}.log-title time{flex:none;color:#7f899f}

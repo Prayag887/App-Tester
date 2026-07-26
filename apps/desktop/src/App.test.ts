@@ -1,9 +1,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, bodyText, compactEndpoint, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, preferredDevice } from "./App";
+import { App, bodyText, compactEndpoint, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, preferredDevice } from "./App";
 import { collectTransactionPages } from "./api";
-import type { AndroidDevice, HttpTransaction } from "./types";
+import type { AndroidDevice, HttpTransaction, LogIncident } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
 describe("traffic presentation", () => {
   it("shows pending rows immediately", () => expect(displayState(transaction)).toBe("Pending"));
@@ -49,5 +49,15 @@ describe("traffic presentation", () => {
     expect(markup).toContain("without deleting saved comparison history");
     expect(markup).toContain("Inspect logs");
     expect(markup).toContain("Toolkit");
+    expect(markup).not.toContain("Connect via QR");
+    expect(markup).not.toContain("Pair with code");
+    expect(markup).not.toContain("USB to Wi-Fi");
+  });
+  it("shows an application frame as the incident location with a Logcat fallback", () => {
+    const incident = {first_app_frame:"at com.example.Home.load(Home.kt:42)",lines:[
+      {tag:"Home",level:"E",message:"failed",timestamp_ms:1},
+    ]} as LogIncident;
+    expect(incidentLocation(incident, "com.example")).toBe("at com.example.Home.load(Home.kt:42)");
+    expect(incidentLocation({...incident,first_app_frame:undefined}, "com.example")).toBe("Home · Logcat");
   });
 });

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Activity, AlertCircle, Cable, CalendarDays, Circle, Copy, Filter, KeyRound, ListTree, Pause, Play, QrCode, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Wifi, X } from "lucide-react";
+import { Activity, AlertCircle, CalendarDays, Circle, Copy, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, X } from "lucide-react";
 import * as api from "./api";
-import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, HttpTransaction, LogIncident, ProxyStatus, QrPairingChallenge } from "./types";
+import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
 type InspectorTab = "Overview" | "Request" | "Response" | "Compare" | "cURL" | "Logs" | "Timeline";
 type Screen = "toolkit" | "logs";
@@ -62,6 +62,8 @@ export const preferredDevice = (current: string, devices: AndroidDevice[]) => {
   return devices.find(device => device.connection_type === "usb" && device.authorization_status === "authorized")?.serial ??
     devices.find(device => device.authorization_status === "authorized")?.serial ?? "";
 };
+export const incidentLocation = (incident: LogIncident, packageName: string) =>
+  incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
 const jsonView = (value: string) => {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
 };
@@ -84,15 +86,7 @@ export function App() {
   const [apps, setApps] = useState<AndroidApp[]>([]);
   const [packageName, setPackageName] = useState("");
   const [notice, setNotice] = useState("");
-  const [qrPairing, setQrPairing] = useState<QrPairingChallenge>();
-  const [qrStatus, setQrStatus] = useState<"waiting"|"paired"|"failed">("waiting");
-  const [codePairingOpen, setCodePairingOpen] = useState(false);
-  const [usbWifiOpen, setUsbWifiOpen] = useState(false);
-  const [pairingHost, setPairingHost] = useState("");
-  const [pairingPort, setPairingPort] = useState("");
-  const [pairingCode, setPairingCode] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const [connectionError, setConnectionError] = useState("");
   const [certificateInstall, setCertificateInstall] = useState<AndroidCertificateInstall>();
   const [caStatus, setCaStatus] = useState<AndroidCaStatus>();
   const [caChanging, setCaChanging] = useState(false);
@@ -104,8 +98,9 @@ export function App() {
     void api.getProxyStatus().then(setProxy);
     const refreshDevices = () => {
       void api.discoverDevices().then(items => {
-        setDevices(items);
-        setDevice(current => preferredDevice(current, items));
+        const usbDevices = items.filter(item => item.connection_type === "usb");
+        setDevices(usbDevices);
+        setDevice(current => preferredDevice(current, usbDevices));
       }).catch(error => setNotice(`Could not refresh Android devices: ${String(error)}`));
     };
     refreshDevices();
@@ -230,54 +225,13 @@ export function App() {
       setCapturing(false); setPaused(false);
     }
   }
-  async function pairWithQr() {
-    try {
-      setQrStatus("waiting");
-      const challenge = await api.beginQrPairing();
-      setQrPairing(challenge);
-      const result = await api.finishQrPairing(challenge.id);
-      setQrStatus("paired");
-      setNotice(`Wireless device paired at ${result.endpoint}`);
-      const items = await api.discoverDevices();
-      setDevices(items);
-      setDevice(items.find(item => item.connection_type === "wireless")?.serial ?? items[0]?.serial ?? "");
-    } catch (error) {
-      setQrStatus("failed");
-      setNotice(String(error));
-    }
-  }
-  async function refreshWirelessDevices(endpoint: string) {
-    setNotice(`Wireless device connected at ${endpoint}`);
-    const items = await api.discoverDevices();
-    setDevices(items);
-    setDevice(items.find(item => item.connection_type === "wireless")?.serial ?? items[0]?.serial ?? "");
-  }
-  async function submitCodePairing() {
-    setConnecting(true); setConnectionError("");
-    try {
-      const result = await api.pairWithCode(pairingHost.trim(), Number(pairingPort), pairingCode.trim());
-      await refreshWirelessDevices(result.endpoint);
-      setCodePairingOpen(false);
-    } catch (error) { setConnectionError(String(error)); }
-    finally { setConnecting(false); }
-  }
-  async function submitUsbWifi() {
-    if (!device) return;
-    setConnecting(true); setConnectionError("");
-    try {
-      const result = await api.enableUsbWifi(device);
-      await refreshWirelessDevices(result.endpoint);
-      setUsbWifiOpen(false);
-    } catch (error) { setConnectionError(String(error)); }
-    finally { setConnecting(false); }
-  }
   async function setupHttpsCapture() {
     if (!device) { setNotice("Select an authorized Android device before setting up HTTPS capture."); return; }
-    setConnecting(true); setConnectionError("");
+    setConnecting(true);
     try {
       const install = await api.prepareAndroidCertificateInstall(device);
       setCertificateInstall(install);
-    } catch (error) { setConnectionError(String(error)); setNotice(String(error)); }
+    } catch (error) { setNotice(String(error)); }
     finally { setConnecting(false); }
   }
   async function changeCaUsage(useCa: boolean) {
@@ -343,14 +297,10 @@ export function App() {
     </aside>
     <section className="shell">
     <header>
-      <div className="window-controls" aria-hidden="true"><i/><i/><i/></div>
       <div className={`proxy ${proxy}`}><Circle/>{proxy === "running" ? "Connected · Capturing automatically" : `Proxy ${proxy.replaceAll("_"," ")}`}</div>
       <select aria-label="Device" value={device} onChange={e=>setDevice(e.target.value)}>
         <option value="">Select device</option>{devices.map(item=><option key={item.serial}>{item.serial}</option>)}
       </select>
-      <button className="qr-trigger" onClick={()=>void pairWithQr()}><QrCode/>Connect via QR</button>
-      <button onClick={()=>{setConnectionError(""); setCodePairingOpen(true);}}><KeyRound/>Pair with code</button>
-      <button onClick={()=>{setConnectionError(""); setUsbWifiOpen(true);}}><Cable/>USB to Wi-Fi</button>
       <div className={`ca-state ${caStatus?.state ?? "unknown"}`} title={caStatus?.detail ?? "Select a device to inspect CA status"}>
         <ShieldCheck/><span>CA {caStatus?.state.replace("_"," ") ?? "unknown"}</span>
       </div>
@@ -440,43 +390,6 @@ export function App() {
       </aside>
     </section></> : <LogInspector incidents={incidents} packageName={packageName} capturing={capturing}
       onStart={() => void start()} />}
-    {qrPairing && <div className="modal-backdrop" role="presentation">
-      <section className="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-title">
-        <button className="close" aria-label="Close" onClick={()=>setQrPairing(undefined)}><X/></button>
-        <div className="qr-heading"><Wifi/><div><h2 id="qr-title">Connect Android over Wi-Fi</h2>
-          <p>Android 11 or newer · same Wi-Fi network</p></div></div>
-        {qrStatus==="waiting" ? <><div className="qr-image" dangerouslySetInnerHTML={{__html:qrPairing.qr_svg}}/>
-          <ol><li>Open <b>Settings → Developer options → Wireless debugging</b>.</li>
-            <li>Tap <b>Pair device with QR code</b>.</li><li>Scan this code with Android’s pairing scanner.</li></ol>
-          <div className="pairing-status"><span className="spinner"/>Waiting for the device…</div>
-          <small>Expires {new Date(qrPairing.expires_at).toLocaleTimeString()}. This QR grants ADB access; only scan it on a device you control.</small></> :
-          qrStatus==="paired" ? <div className="pair-result success"><ShieldCheck/><h3>Device connected</h3><p>The wireless device is now available in the device selector.</p>
-            <button className="primary" onClick={()=>setQrPairing(undefined)}>Done</button></div> :
-          <div className="pair-result failed"><Circle/><h3>Pairing failed</h3><p>{notice}</p><button onClick={()=>void pairWithQr()}>Generate a new QR</button></div>}
-      </section>
-    </div>}
-    {codePairingOpen && <div className="modal-backdrop" role="presentation">
-      <section className="qr-dialog connection-dialog" role="dialog" aria-modal="true" aria-labelledby="code-pair-title">
-        <button className="close" aria-label="Close" onClick={()=>setCodePairingOpen(false)}><X/></button>
-        <div className="qr-heading"><KeyRound/><div><h2 id="code-pair-title">Pair Android with a code</h2><p>Reliable alternative to Android’s QR scanner</p></div></div>
-        <ol><li>On Android, open <b>Developer options → Wireless debugging</b>.</li><li>Tap <b>Pair device with pairing code</b>.</li><li>Enter its IP address, pairing port, and six-digit code below.</li></ol>
-        <label>Device IP or host<input value={pairingHost} placeholder="192.168.1.44" onChange={e=>setPairingHost(e.target.value)} autoComplete="off"/></label>
-        <label>Pairing port<input inputMode="numeric" value={pairingPort} placeholder="37123" onChange={e=>setPairingPort(e.target.value)}/></label>
-        <label>Six-digit pairing code<input inputMode="numeric" value={pairingCode} placeholder="123456" maxLength={6} onChange={e=>setPairingCode(e.target.value.replace(/\D/g, ""))}/></label>
-        {connectionError && <p className="connection-error">{connectionError}</p>}
-        <button className="primary submit" disabled={connecting || !pairingHost || !pairingPort || pairingCode.length !== 6} onClick={()=>void submitCodePairing()}>{connecting ? "Pairing…" : "Pair device"}</button>
-      </section>
-    </div>}
-    {usbWifiOpen && <div className="modal-backdrop" role="presentation">
-      <section className="qr-dialog connection-dialog" role="dialog" aria-modal="true" aria-labelledby="usb-wifi-title">
-        <button className="close" aria-label="Close" onClick={()=>setUsbWifiOpen(false)}><X/></button>
-        <div className="qr-heading"><Cable/><div><h2 id="usb-wifi-title">Use USB once, then Wi-Fi</h2><p>For an already USB-authorized device</p></div></div>
-        <p>This enables legacy ADB over Wi-Fi on <b>{device || "the selected device"}</b> at port 5555, discovers its Wi-Fi IP, and connects it wirelessly.</p>
-        <p className="warning">Keep the device and this Mac on the same network. Disconnecting USB after the wireless connection succeeds is safe.</p>
-        {connectionError && <p className="connection-error">{connectionError}</p>}
-        <button className="primary submit" disabled={connecting || !device} onClick={()=>void submitUsbWifi()}>{connecting ? "Connecting…" : "Enable Wi-Fi connection"}</button>
-      </section>
-    </div>}
     {certificateInstall && <div className="modal-backdrop" role="presentation">
       <section className="qr-dialog connection-dialog" role="dialog" aria-modal="true" aria-labelledby="certificate-title">
         <button className="close" aria-label="Close" onClick={()=>setCertificateInstall(undefined)}><X/></button>
@@ -515,6 +428,7 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
 }) {
   const errors = incidents.filter(item => ["crash","error","anr","dto_parsing"].includes(item.category)).length;
   const warnings = incidents.length - errors;
+  const latest = incidents[0];
   return <section className="log-screen">
     <div className="screen-heading">
       <div><span>Inspect logs</span><h1>Detected app issues</h1></div>
@@ -526,6 +440,11 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
       <article className="error"><span>Errors</span><strong>{errors}</strong><small>Crashes and failures</small></article>
       <article><span>Warnings</span><strong>{warnings}</strong><small>Potential problems</small></article>
       <article><span>Package</span><b>{packageName || "Not selected"}</b><small>{capturing ? "Monitoring live" : "Capture stopped"}</small></article>
+      {latest && <article className="issue-overview">
+        <div><span>Latest issue · How it happened</span><strong>{latest.title}</strong><p>{latest.message}</p></div>
+        <div><span>Where detected</span><code>{incidentLocation(latest, packageName)}</code>
+          <small>{new Date(latest.occurred_at).toLocaleString()}</small></div>
+      </article>}
     </div>
     <div className="log-list">
       {incidents.map(incident => <article className="log-card" key={incident.id}>
@@ -534,7 +453,7 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
           <div className="log-title"><div><h2>{incident.title}</h2><p>{incident.message}</p></div>
             <time>{new Date(incident.occurred_at).toLocaleTimeString()}</time></div>
           <div className="detected-at"><span>Detected at</span>
-            <code>{incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`}</code></div>
+            <code>{incidentLocation(incident, packageName)}</code></div>
           <details><summary>View {incident.lines.length} captured log {incident.lines.length === 1 ? "line" : "lines"}</summary>
             {incident.lines.map((line,index)=><pre key={index}>{line.level} {line.tag}: {line.message}</pre>)}</details>
         </div>
