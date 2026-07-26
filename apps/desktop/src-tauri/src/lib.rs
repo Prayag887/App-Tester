@@ -11,11 +11,10 @@ use androidqa_core::{
 use serde::Serialize;
 use std::{
     collections::HashMap,
-    io::{Read, Seek, SeekFrom, Write},
-    net::{TcpListener, UdpSocket},
+    net::UdpSocket,
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tauri::{Emitter, Manager};
 use time::{OffsetDateTime, PrimitiveDateTime, Time};
@@ -51,7 +50,6 @@ struct AndroidCaChange {
 struct CompanionInstall {
     install_url: String,
     qr_svg: String,
-    expires_at: String,
 }
 
 struct InspectorState {
@@ -108,19 +106,8 @@ fn begin_qr_pairing(state: tauri::State<'_, InspectorState>) -> Result<QrPairing
 
 #[tauri::command]
 fn prepare_companion_install(app: tauri::AppHandle) -> Result<CompanionInstall, String> {
-    let apk_path = companion_apk_path(&app)?;
-    let host = lan_ipv4()?;
-    let listener = TcpListener::bind("0.0.0.0:0")
-        .map_err(|error| format!("could not start the local companion installer: {error}"))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|error| format!("could not configure the local companion installer: {error}"))?;
-    let token = Uuid::new_v4().simple().to_string();
-    let port = listener
-        .local_addr()
-        .map_err(|error| format!("could not inspect the local companion installer: {error}"))?
-        .port();
-    let install_url = format!("http://{host}:{port}/companion/{token}.apk");
+    companion_apk_path(&app)?;
+    let install_url = "https://raw.githubusercontent.com/Prayag887/postman-like/main/apps/companion/releases/app-tester-companion.apk".to_string();
     let qr_svg = qrcode::QrCode::new(install_url.as_bytes())
         .map_err(|error| format!("could not create the companion install QR code: {error}"))?
         .render::<qrcode::render::svg::Color>()
@@ -128,14 +115,9 @@ fn prepare_companion_install(app: tauri::AppHandle) -> Result<CompanionInstall, 
         .dark_color(qrcode::render::svg::Color("#08110f"))
         .light_color(qrcode::render::svg::Color("#ffffff"))
         .build();
-    std::thread::spawn(move || serve_companion_apk(listener, apk_path, token));
-    let expires_at = (OffsetDateTime::now_utc() + time::Duration::minutes(10))
-        .format(&time::format_description::well_known::Rfc3339)
-        .map_err(|error| format!("could not format the companion install expiry: {error}"))?;
     Ok(CompanionInstall {
         install_url,
         qr_svg,
-        expires_at,
     })
 }
 
@@ -168,96 +150,6 @@ fn companion_apk_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     development.is_file().then_some(development).ok_or_else(|| {
         "App Tester Companion has not been built yet. Build apps/companion first.".into()
     })
-}
-
-fn serve_companion_apk(listener: TcpListener, apk_path: PathBuf, token: String) {
-    let deadline = Instant::now() + Duration::from_secs(600);
-    while Instant::now() < deadline {
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
-                let mut request = Vec::with_capacity(1024);
-                let mut buffer = [0_u8; 1024];
-                while request.len() < 8 * 1024 {
-                    let Ok(read) = stream.read(&mut buffer) else {
-                        break;
-                    };
-                    if read == 0 {
-                        break;
-                    }
-                    request.extend_from_slice(&buffer[..read]);
-                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let request = String::from_utf8_lossy(&request);
-                let expected_path = format!("GET /companion/{token}.apk ");
-                let absolute_path = format!("/companion/{token}.apk ");
-                if !request.starts_with(&expected_path)
-                    && !request.lines().next().is_some_and(|line| {
-                        line.starts_with("GET http://") && line.contains(&absolute_path)
-                    })
-                {
-                    let _ = stream.write_all(
-                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                    );
-                    continue;
-                }
-                let Ok(mut file) = std::fs::File::open(&apk_path) else {
-                    continue;
-                };
-                let length = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
-                let range_start = request
-                    .lines()
-                    .find_map(|line| {
-                        line.strip_prefix("Range: ")
-                            .or_else(|| line.strip_prefix("range: "))
-                    })
-                    .and_then(parse_range_start);
-                let start = match range_start {
-                    Some(start) if start < length => start,
-                    Some(_) => {
-                        let _ = stream.write_all(b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                        continue;
-                    }
-                    None => 0,
-                };
-                let is_partial = range_start.is_some();
-                let _ = file.seek(SeekFrom::Start(start));
-                let remaining = length.saturating_sub(start);
-                let header = format!(
-                    "HTTP/1.1 {}\r\nContent-Type: application/vnd.android.package-archive\r\nContent-Length: {remaining}\r\nContent-Disposition: attachment; filename=app-tester-companion.apk\r\nAccept-Ranges: bytes\r\n{}Cache-Control: no-store\r\nConnection: close\r\n\r\n",
-                    if is_partial {
-                        "206 Partial Content"
-                    } else {
-                        "200 OK"
-                    },
-                    if is_partial {
-                        format!("Content-Range: bytes {start}-{}/{}\r\n", length - 1, length)
-                    } else {
-                        String::new()
-                    },
-                );
-                if stream.write_all(header.as_bytes()).is_ok() {
-                    let _ = std::io::copy(&mut file, &mut stream);
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(50))
-            }
-            Err(_) => break,
-        }
-    }
-}
-
-fn parse_range_start(value: &str) -> Option<u64> {
-    value
-        .strip_prefix("bytes=")?
-        .split_once('-')?
-        .0
-        .parse()
-        .ok()
 }
 
 #[tauri::command]
@@ -996,7 +888,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod desktop_tests {
-    use super::{parse_range_start, parse_root_ca_probe};
+    use super::parse_root_ca_probe;
 
     #[test]
     fn rejects_shell_errors_as_proof_of_root_access() {
@@ -1006,12 +898,5 @@ mod desktop_tests {
             parse_root_ca_probe("/system/bin/sh: su: inaccessible or not found\n"),
             None
         );
-    }
-
-    #[test]
-    fn parses_download_manager_byte_ranges() {
-        assert_eq!(parse_range_start("bytes=131072-"), Some(131_072));
-        assert_eq!(parse_range_start("bytes=0-1023"), Some(0));
-        assert_eq!(parse_range_start("items=0-1"), None);
     }
 }
