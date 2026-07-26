@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Activity, AlertCircle, CalendarDays, Circle, Copy, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, X } from "lucide-react";
+import { Activity, AlertCircle, CalendarDays, Circle, Copy, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Wifi, X } from "lucide-react";
 import * as api from "./api";
 import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
@@ -88,6 +88,7 @@ export function App() {
   const [packageName, setPackageName] = useState("");
   const [notice, setNotice] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [enablingUsbWifi, setEnablingUsbWifi] = useState(false);
   const [certificateInstall, setCertificateInstall] = useState<AndroidCertificateInstall>();
   const [caStatus, setCaStatus] = useState<AndroidCaStatus>();
   const [caChanging, setCaChanging] = useState(false);
@@ -99,9 +100,8 @@ export function App() {
     void api.getProxyStatus().then(setProxy);
     const refreshDevices = () => {
       void api.discoverDevices().then(items => {
-        const usbDevices = items.filter(item => item.connection_type === "usb");
-        setDevices(usbDevices);
-        setDevice(current => preferredDevice(current, usbDevices));
+        setDevices(items);
+        setDevice(current => preferredDevice(current, items));
       }).catch(error => setNotice(`Could not refresh Android devices: ${String(error)}`));
     };
     refreshDevices();
@@ -229,6 +229,20 @@ export function App() {
       setCapturing(false); setPaused(false);
     }
   }
+  async function switchUsbToWifi() {
+    const selectedDevice = devices.find(item => item.serial === device);
+    if (!selectedDevice || selectedDevice.connection_type !== "usb") return;
+    setEnablingUsbWifi(true);
+    try {
+      const result = await api.enableUsbWifi(selectedDevice.serial);
+      setDevice(result.endpoint);
+      setNotice(`Wi-Fi debugging is ready at ${result.endpoint}. Keep the phone and Mac on the same Wi-Fi, then you can unplug USB.`);
+    } catch (error) {
+      setNotice(`Could not switch ${selectedDevice.serial} to Wi-Fi: ${String(error)}`);
+    } finally {
+      setEnablingUsbWifi(false);
+    }
+  }
   async function selectPackage(nextPackage: string) {
     if (nextPackage === packageName) return;
     setConnecting(true);
@@ -321,6 +335,13 @@ export function App() {
       <select aria-label="Device" value={device} onChange={e=>setDevice(e.target.value)}>
         <option value="">Select device</option>{devices.map(item=><option key={item.serial}>{item.serial}</option>)}
       </select>
+      {devices.find(item => item.serial === device)?.connection_type === "usb" && <button
+        className="wireless-device"
+        disabled={enablingUsbWifi || capturing}
+        title={capturing ? "Stop capture before switching this device to Wi-Fi" : "Keep debugging available after unplugging USB"}
+        onClick={()=>void switchUsbToWifi()}>
+        <Wifi/>{enablingUsbWifi ? "Enabling Wi-Fi…" : "USB to Wi-Fi"}
+      </button>}
       <div className={`ca-state ${caStatus?.state ?? "unknown"}`} title={caStatus?.detail ?? "Select a device to inspect CA status"}>
         <ShieldCheck/><span>CA {caStatus?.state.replace("_"," ") ?? "unknown"}</span>
       </div>
