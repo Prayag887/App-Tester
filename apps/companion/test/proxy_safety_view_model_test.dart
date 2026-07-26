@@ -4,44 +4,52 @@ import 'package:flutter_test/flutter_test.dart';
 
 class FakeRepository implements ProxySafetyRepository {
   ProxySafetyStatus current =
-      const ProxySafetyStatus(isDeviceOwner: true, isArmed: false);
+      const ProxySafetyStatus(isMonitoring: false, isVpnActive: false);
   String? armedHost;
   int? armedPort;
 
   @override
-  Future<ProxySafetyStatus> arm(
+  Future<ProxySafetyStatus> startMonitoring(
       {required String host, required int port}) async {
     armedHost = host;
     armedPort = port;
     return current = ProxySafetyStatus(
-        isDeviceOwner: true, isArmed: true, host: host, port: port);
+        isMonitoring: true, isVpnActive: false, host: host, port: port);
   }
 
   @override
-  Future<ProxySafetyStatus> disarm() async =>
-      current = const ProxySafetyStatus(isDeviceOwner: true, isArmed: false);
+  Future<ProxySafetyStatus> stopMonitoring() async =>
+      current = const ProxySafetyStatus(isMonitoring: false, isVpnActive: false);
+
+  @override
+  Future<ProxySafetyStatus> startVpn({required String host, required int port, required String targetPackage}) async =>
+      current = ProxySafetyStatus(isMonitoring: false, isVpnActive: true, host: host, port: port, targetPackage: targetPackage);
+
+  @override
+  Future<ProxySafetyStatus> stopVpn() async =>
+      current = const ProxySafetyStatus(isMonitoring: false, isVpnActive: false);
 
   @override
   Future<ProxySafetyStatus> status() async => current;
 }
 
 void main() {
-  test('arms the configured desktop proxy', () async {
+  test('starts monitoring the configured desktop endpoint', () async {
     final repository = FakeRepository();
     final model = ProxySafetyViewModel(repository);
 
-    await model.arm('10.10.10.15', '8080');
+    await model.startMonitoring('10.10.10.15', '8080');
 
     expect(repository.armedHost, '10.10.10.15');
     expect(repository.armedPort, 8080);
-    expect(model.status?.isArmed, isTrue);
+    expect(model.status?.isMonitoring, isTrue);
   });
 
   test('rejects an invalid proxy port before calling Android', () async {
     final repository = FakeRepository();
     final model = ProxySafetyViewModel(repository);
 
-    await model.arm('10.10.10.15', '0');
+    await model.startMonitoring('10.10.10.15', '0');
 
     expect(repository.armedPort, isNull);
     expect(model.error, contains('1 to 65535'));
