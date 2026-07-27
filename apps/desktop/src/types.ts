@@ -46,6 +46,7 @@ export interface QrPairingChallenge {
 }
 export interface QrPairingResult { endpoint: string; adb_output: string }
 export interface CompanionInstall { install_url: string; qr_svg: string }
+export interface CompanionConnection { payload: string; qr_svg: string }
 export interface AndroidCertificateInstall { remote_path: string; installer_output: string }
 export interface AndroidCaStatus {
   state: "installed" | "not_installed" | "unknown";

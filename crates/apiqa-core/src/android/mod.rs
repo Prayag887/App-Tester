@@ -134,6 +134,20 @@ fn validate_host(host: &str) -> Result<(), DeviceError> {
     }
 }
 
+pub fn validate_companion_connection(host: &str, package_name: &str) -> Result<(), DeviceError> {
+    validate_host(host)?;
+    let valid_package = !package_name.is_empty()
+        && package_name.len() <= 255
+        && package_name.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_')
+        });
+    if valid_package {
+        Ok(())
+    } else {
+        Err(DeviceError::Adb("invalid Android package name".into()))
+    }
+}
+
 pub fn parse_wifi_ipv4(routes: &str) -> Option<String> {
     let expression =
         Regex::new(r"\bsrc ((?:\d{1,3}\.){3}\d{1,3})\b").expect("valid IP route regex");
@@ -340,6 +354,13 @@ mod tests {
         assert_eq!(challenge.id, secret.id);
         assert!(challenge.qr_svg.contains("<svg"));
         assert!(!challenge.qr_svg.contains(&secret.password));
+    }
+
+    #[test]
+    fn validates_companion_connection_values() {
+        assert!(validate_companion_connection("192.168.1.12", "com.example.app").is_ok());
+        assert!(validate_companion_connection("192.168.1.12", "bad package").is_err());
+        assert!(validate_companion_connection("host/path", "com.example.app").is_err());
     }
 
     #[test]

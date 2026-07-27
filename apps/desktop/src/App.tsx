@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Activity, AlertCircle, CalendarDays, Circle, Copy, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Wifi, X } from "lucide-react";
 import * as api from "./api";
-import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, CompanionInstall, HttpTransaction, LogIncident, ProxyStatus } from "./types";
+import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, CompanionConnection, CompanionInstall, HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
 type InspectorTab = "Overview" | "Request" | "Response" | "Compare" | "cURL" | "Logs" | "Timeline";
 type Screen = "toolkit" | "logs";
@@ -92,6 +92,7 @@ export function App() {
   const [enablingUsbWifi, setEnablingUsbWifi] = useState(false);
   const [certificateInstall, setCertificateInstall] = useState<AndroidCertificateInstall>();
   const [companionInstall, setCompanionInstall] = useState<CompanionInstall>();
+  const [companionConnection, setCompanionConnection] = useState<CompanionConnection>();
   const [installingCompanion, setInstallingCompanion] = useState(false);
   const [caStatus, setCaStatus] = useState<AndroidCaStatus>();
   const [caChanging, setCaChanging] = useState(false);
@@ -260,6 +261,17 @@ export function App() {
       setNotice(`Could not prepare the companion installer: ${String(error)}`);
     }
   }
+  async function openCompanionConnection() {
+    if (!packageName || !desktopHost || desktopHost === "Resolving…") {
+      setNotice("Select an app and wait for the desktop Wi-Fi address.");
+      return;
+    }
+    try {
+      setCompanionConnection(await api.prepareCompanionConnection(desktopHost, packageName));
+    } catch (error) {
+      setNotice(`Could not prepare companion connection: ${String(error)}`);
+    }
+  }
   async function installCompanionDirectly() {
     if (!device) return;
     setInstallingCompanion(true);
@@ -371,8 +383,8 @@ export function App() {
         onClick={()=>void switchUsbToWifi()}>
         <Wifi/>{enablingUsbWifi ? "Enabling Wi-Fi…" : "USB to Wi-Fi"}
       </button>}
-      <button title="Install the Android companion from a phone on this Wi-Fi" onClick={()=>void openCompanionInstall()}>
-        <ShieldCheck/>Install companion
+      <button disabled={!packageName} title="Connect the companion without USB" onClick={()=>void openCompanionConnection()}>
+        <ShieldCheck/>Connect companion
       </button>
       <div className={`ca-state ${caStatus?.state ?? "unknown"}`} title={caStatus?.detail ?? "Select a device to inspect CA status"}>
         <ShieldCheck/><span>CA {caStatus?.state.replace("_"," ") ?? "unknown"}</span>
@@ -483,6 +495,15 @@ export function App() {
         <ol><li>Scan this code with the phone camera.</li><li>Download the signed APK from the App Tester GitHub repository.</li><li>Approve Android’s one-time install confirmation, then open the companion.</li></ol>
         {device && <button className="primary submit" disabled={installingCompanion} onClick={()=>void installCompanionDirectly()}>{installingCompanion ? "Installing…" : "Install directly on selected device"}</button>}
         <p className="warning">If Android blocks browser downloads, select a paired Wi-Fi device above and use direct install.</p>
+      </section>
+    </div>}
+    {companionConnection && <div className="modal-backdrop" role="presentation">
+      <section className="qr-dialog connection-dialog" role="dialog" aria-modal="true" aria-labelledby="companion-connect-title">
+        <button className="close" aria-label="Close" onClick={()=>setCompanionConnection(undefined)}><X/></button>
+        <div className="qr-heading"><Wifi/><div><h2 id="companion-connect-title">Connect companion</h2><p>One scan. No host, port, or package entry.</p></div></div>
+        <div className="qr-image" dangerouslySetInnerHTML={{__html:companionConnection.qr_svg}} />
+        <p>Open App Tester Companion and scan. Keep phone and computer on same Wi-Fi.</p>
+        <button onClick={()=>{setCompanionConnection(undefined); void openCompanionInstall();}}>Install companion instead</button>
       </section>
     </div>}
   </section></main>;

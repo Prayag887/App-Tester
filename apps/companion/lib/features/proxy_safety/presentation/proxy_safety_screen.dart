@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../shared/brand/app_tester_mark.dart';
-import '../data/proxy_safety_repository.dart';
 import 'proxy_safety_view_model.dart';
 
 class ProxySafetyScreen extends StatefulWidget {
@@ -14,23 +14,37 @@ class ProxySafetyScreen extends StatefulWidget {
 }
 
 class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
-  late final TextEditingController _host;
-  late final TextEditingController _port;
-  late final TextEditingController _package;
+  final _scanner = MobileScannerController(autoStart: false);
+  bool _scanning = false;
 
   @override
   void initState() {
     super.initState();
-    _host = TextEditingController();
-    _port = TextEditingController(text: '8080');
-    _package = TextEditingController();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startScanner());
+  }
+
+  Future<void> _startScanner() async {
+    if (_scanning || widget.viewModel.status?.isVpnActive == true) return;
+    setState(() => _scanning = true);
+    await _scanner.start();
+  }
+
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    final payload = capture.barcodes.firstOrNull?.rawValue;
+    if (payload == null || widget.viewModel.isWorking) return;
+    await _scanner.stop();
+    if (mounted) setState(() => _scanning = false);
+    await widget.viewModel.connectFromQr(payload);
+    if (mounted &&
+        widget.viewModel.status?.isVpnActive != true &&
+        widget.viewModel.status?.targetPackage == null) {
+      await _startScanner();
+    }
   }
 
   @override
   void dispose() {
-    _host.dispose();
-    _port.dispose();
-    _package.dispose();
+    _scanner.dispose();
     super.dispose();
   }
 
@@ -39,157 +53,171 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
         animation: widget.viewModel,
         builder: (context, _) {
           final model = widget.viewModel;
-          final status = model.status;
-          if (status?.host != null && _host.text.isEmpty) _host.text = status!.host!;
-          if (status?.port != null && _port.text == '8080') _port.text = '${status!.port}';
-          if (status?.targetPackage != null && _package.text.isEmpty) _package.text = status!.targetPackage!;
-          final active = status?.isVpnActive == true;
+          final active = model.status?.isVpnActive == true;
           return Scaffold(
             body: SafeArea(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
-                children: [
-                  const _AppHeader(),
-                  const SizedBox(height: 24),
-                  _ConnectionCard(active: active, statusMessage: status?.message),
-                  const SizedBox(height: 18),
-                  Text('Desktop link', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 4),
-                  const Text('Use the green Desktop host shown in the App Tester desktop header.'),
-                  const SizedBox(height: 16),
-                  _EndpointFields(host: _host, port: _port, targetPackage: _package),
-                  if (model.error != null) ...[
-                    const SizedBox(height: 12),
-                    _InlineMessage(message: model.error!, isError: true),
-                  ],
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                    onPressed: model.isWorking
-                        ? null
-                        : () => active
-                            ? model.stopVpn()
-                            : model.startVpn(_host.text, _port.text, _package.text),
-                    icon: Icon(active ? Icons.stop_circle_outlined : Icons.play_circle_outline),
-                    label: Text(model.isWorking
-                        ? 'Updating connection…'
-                        : active
-                            ? 'Stop VPN capture'
-                            : 'Start VPN capture'),
+              child: LayoutBuilder(builder: (context, constraints) {
+                final wide = constraints.maxWidth >= 720;
+                final scanPanel = _ScanPanel(active: active, scanning: _scanning, scanner: _scanner, onDetect: _onDetect);
+                final connectionPanel = _ConnectionPanel(model: model, active: active);
+                return SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(wide ? 32 : 18, 18, wide ? 32 : 18, 30),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 980),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const _Header(),
+                        const SizedBox(height: 24),
+                        if (wide)
+                          SizedBox(height: constraints.maxHeight - 130, child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(flex: 6, child: scanPanel), const SizedBox(width: 24), Expanded(flex: 5, child: connectionPanel)]))
+                        else ...[
+                          scanPanel,
+                          const SizedBox(height: 22),
+                          connectionPanel,
+                        ],
+                      ]),
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  const _PermissionNote(),
-                  const SizedBox(height: 28),
-                  _ActivityLog(logs: status?.logs ?? const [], active: active),
-                ],
-              ),
+                );
+              }),
             ),
           );
         },
       );
 }
 
-class _AppHeader extends StatelessWidget {
-  const _AppHeader();
+class _Header extends StatelessWidget {
+  const _Header();
 
   @override
-  Widget build(BuildContext context) => Row(children: [
-        const AppTesterMark(size: 54),
-        const SizedBox(width: 14),
+  Widget build(BuildContext context) => const Row(children: [
+        AppTesterMark(size: 44),
+        SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('App Tester', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-          Text('Companion', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: const Color(0xff7b93b7))),
+          Text('App Tester', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+          Text('Companion', style: TextStyle(color: Color(0xff8ea6c9))),
         ])),
-        const Icon(Icons.more_horiz, color: Color(0xff7b93b7)),
       ]);
 }
 
-class _ConnectionCard extends StatelessWidget {
-  const _ConnectionCard({required this.active, this.statusMessage});
+class _ScanPanel extends StatelessWidget {
+  const _ScanPanel({required this.active, required this.scanning, required this.scanner, required this.onDetect});
   final bool active;
-  final String? statusMessage;
+  final bool scanning;
+  final MobileScannerController scanner;
+  final void Function(BarcodeCapture) onDetect;
 
   @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Container(
-              width: 42, height: 42,
-              decoration: BoxDecoration(color: active ? const Color(0xff113d38) : const Color(0xff162842), borderRadius: BorderRadius.circular(12)),
-              child: Icon(active ? Icons.link : Icons.link_off, color: active ? const Color(0xff2be0a7) : const Color(0xff91a5c2)),
-            ),
-            const SizedBox(width: 14),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(active ? 'Desktop link active' : 'Direct networking', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text(statusMessage ?? (active ? 'Checking that your desktop is reachable.' : 'No companion network action is running.'), style: const TextStyle(color: Color(0xffaebfd8))),
-            ])),
-          ]),
+  Widget build(BuildContext context) => AnimatedSwitcher(
+        duration: const Duration(milliseconds: 450),
+        child: active
+            ? const _SuccessVisual(key: ValueKey('active'))
+            : Column(key: const ValueKey('scanner'), crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Scan connection code', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                const Text('Open App Tester on your computer, select an app, then choose Connect companion.', style: TextStyle(color: Color(0xffaebfd8), height: 1.4)),
+                const SizedBox(height: 18),
+                AspectRatio(
+                  aspectRatio: 1,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Stack(fit: StackFit.expand, children: [
+                      if (scanning) MobileScanner(controller: scanner, onDetect: onDetect) else const ColoredBox(color: Color(0xff0d1d35)),
+                      const _ScannerFrame(),
+                    ]),
+                  ),
+                ),
+              ]),
+      );
+}
+
+class _ScannerFrame extends StatelessWidget {
+  const _ScannerFrame();
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(border: Border.all(color: const Color(0xff2be0a7), width: 2), borderRadius: BorderRadius.circular(24)),
+          child: Center(child: Container(width: 180, height: 180, decoration: BoxDecoration(border: Border.all(color: Colors.white70, width: 2), borderRadius: BorderRadius.circular(18)))),
         ),
       );
 }
 
-class _EndpointFields extends StatelessWidget {
-  const _EndpointFields({required this.host, required this.port, required this.targetPackage});
-  final TextEditingController host;
-  final TextEditingController port;
-  final TextEditingController targetPackage;
-
+class _SuccessVisual extends StatelessWidget {
+  const _SuccessVisual({super.key});
   @override
-  Widget build(BuildContext context) => Column(children: [
-        Row(children: [
-          Expanded(flex: 3, child: TextField(controller: host, keyboardType: TextInputType.url, decoration: const InputDecoration(labelText: 'Desktop host', hintText: '192.168.1.24', prefixIcon: Icon(Icons.computer_outlined)))),
-          const SizedBox(width: 12),
-          Expanded(flex: 2, child: TextField(controller: port, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Port', prefixIcon: Icon(Icons.settings_ethernet)))),
-        ]),
-        const SizedBox(height: 12),
-        TextField(controller: targetPackage, autocorrect: false, decoration: const InputDecoration(labelText: 'Selected package', hintText: 'com.example.app', prefixIcon: Icon(Icons.apps_outlined))),
-      ]);
-}
-
-class _PermissionNote extends StatelessWidget {
-  const _PermissionNote();
-  @override
-  Widget build(BuildContext context) => const _InlineMessage(
-        message: 'No device-owner or administrator permission is required. Android asks for its standard VPN consent once, and only the selected package is routed through the capture relay.',
+  Widget build(BuildContext context) => Container(
+        constraints: const BoxConstraints(minHeight: 320),
+        decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xff123a36), Color(0xff0b2032)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(28)),
+        child: Center(child: TweenAnimationBuilder<double>(tween: Tween(begin: 0.7, end: 1), duration: const Duration(milliseconds: 550), curve: Curves.easeOutBack, builder: _buildCheck)),
       );
+
+  static Widget _buildCheck(BuildContext context, double scale, Widget? child) => Transform.scale(scale: scale, child: const Icon(Icons.check_circle_rounded, size: 112, color: Color(0xff2be0a7)));
 }
 
-class _InlineMessage extends StatelessWidget {
-  const _InlineMessage({required this.message, this.isError = false});
-  final String message;
-  final bool isError;
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-        decoration: BoxDecoration(color: isError ? const Color(0xff421c27) : const Color(0xff102540), borderRadius: BorderRadius.circular(12)),
-        child: Padding(padding: const EdgeInsets.all(13), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(isError ? Icons.error_outline : Icons.info_outline, color: isError ? const Color(0xffff9bac) : const Color(0xff82baff), size: 20),
-          const SizedBox(width: 10), Expanded(child: Text(message, style: const TextStyle(color: Color(0xffcad8ea), height: 1.35))),
-        ])),
-      );
-}
-
-class _ActivityLog extends StatelessWidget {
-  const _ActivityLog({required this.logs, required this.active});
-  final List<CompanionLogEntry> logs;
+class _ConnectionPanel extends StatelessWidget {
+  const _ConnectionPanel({required this.model, required this.active});
+  final ProxySafetyViewModel model;
   final bool active;
+
   @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Text('Activity log', style: Theme.of(context).textTheme.titleLarge), const Spacer(), const Text('LIVE', style: TextStyle(color: Color(0xff2be0a7), fontWeight: FontWeight.w700, fontSize: 12))]),
+  Widget build(BuildContext context) {
+    final network = switch (model.networkMatch) {
+      NetworkMatch.sameWifi => ('Same Wi-Fi confirmed', Icons.wifi_rounded, const Color(0xff2be0a7)),
+      NetworkMatch.reachable => ('Desktop reachable; Wi-Fi name unavailable', Icons.wifi_find_rounded, const Color(0xffffc66d)),
+      NetworkMatch.unreachable => ('Not on same reachable network', Icons.wifi_off_rounded, const Color(0xffff879a)),
+      NetworkMatch.unknown => ('Wi-Fi not checked yet', Icons.wifi_find_rounded, const Color(0xff8ea6c9)),
+    };
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      AnimatedContainer(
+        duration: const Duration(milliseconds: 350),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(color: active ? const Color(0xff103831) : const Color(0xff0d1d35), borderRadius: BorderRadius.circular(20), border: Border.all(color: active ? const Color(0xff246f5d) : const Color(0xff203651))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(active ? Icons.link_rounded : Icons.qr_code_scanner_rounded, color: active ? const Color(0xff2be0a7) : const Color(0xff82baff), size: 34),
+          const SizedBox(height: 16),
+          Text(active ? 'Capture connected' : model.isWorking ? 'Connecting…' : 'Ready to scan', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 7),
+          Text(active ? 'Traffic is flowing to App Tester. You can leave this screen open or switch apps.' : 'Host, port, and package are configured from the QR code.', style: const TextStyle(color: Color(0xffaebfd8), height: 1.4)),
+        ]),
+      ),
+      const SizedBox(height: 14),
+      _StatusRow(icon: network.$2, color: network.$3, title: network.$1),
+      if (model.status?.targetPackage case final package?) ...[
         const SizedBox(height: 10),
-        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
-          if (logs.isEmpty) _LogRow(icon: active ? Icons.check_circle : Icons.info_outline, color: active ? const Color(0xff2be0a7) : const Color(0xff82baff), title: active ? 'Waiting for the first health check' : 'Companion ready', detail: 'Enter the desktop host to begin.')
-          else ...logs.take(8).map((entry) => Padding(padding: const EdgeInsets.only(bottom: 14), child: _LogRow(icon: Icons.circle, color: const Color(0xff2be0a7), title: entry.message, detail: entry.time))),
-          const Divider(height: 24, color: Color(0xff203651)),
-          const _LogRow(icon: Icons.privacy_tip_outlined, color: Color(0xff91a5c2), title: 'No device administration', detail: 'The companion does not take ownership of this phone.'),
-        ]))),
-      ]);
+        _StatusRow(icon: Icons.android_rounded, color: const Color(0xff82baff), title: package),
+      ],
+      if (model.error != null) ...[
+        const SizedBox(height: 14),
+        _ErrorMessage(model.error!),
+      ],
+      if (active) ...[
+        const SizedBox(height: 18),
+        OutlinedButton.icon(onPressed: model.isWorking ? null : model.stopVpn, icon: const Icon(Icons.stop_circle_outlined), label: const Text('Disconnect'), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50))),
+      ],
+    ]);
+  }
 }
 
-class _LogRow extends StatelessWidget {
-  const _LogRow({required this.icon, required this.color, required this.title, required this.detail});
-  final IconData icon; final Color color; final String title; final String detail;
+class _StatusRow extends StatelessWidget {
+  const _StatusRow({required this.icon, required this.color, required this.title});
+  final IconData icon;
+  final Color color;
+  final String title;
   @override
-  Widget build(BuildContext context) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(icon, color: color, size: 20), const SizedBox(width: 11), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.w600)), const SizedBox(height: 3), Text(detail, style: const TextStyle(color: Color(0xffaebfd8)))]))]);
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(color: const Color(0xff0a1729), borderRadius: BorderRadius.circular(14)),
+        child: Row(children: [Icon(icon, color: color, size: 21), const SizedBox(width: 11), Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)))]),
+      );
+}
+
+class _ErrorMessage extends StatelessWidget {
+  const _ErrorMessage(this.message);
+  final String message;
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: const Color(0xff421c27), borderRadius: BorderRadius.circular(14)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Icon(Icons.error_outline, color: Color(0xffff9bac)), const SizedBox(width: 10), Expanded(child: Text(message, style: const TextStyle(height: 1.35)))]),
+      );
 }

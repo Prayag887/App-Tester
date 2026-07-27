@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -11,6 +13,7 @@ class ProxySafetyViewModel extends ChangeNotifier {
   ProxySafetyStatus? status;
   bool isWorking = false;
   String? error;
+  NetworkMatch networkMatch = NetworkMatch.unknown;
   Timer? _refreshTimer;
 
   Future<void> load() async {
@@ -46,6 +49,58 @@ class ProxySafetyViewModel extends ChangeNotifier {
     _syncRefreshTimer();
   }
 
+  Future<void> connectFromQr(String rawPayload) async {
+    if (isWorking) return;
+    try {
+      final payload = jsonDecode(rawPayload);
+      if (payload is! Map<String, dynamic> ||
+          payload['protocol'] != 'app-tester-companion' ||
+          payload['version'] != 1) {
+        throw const FormatException('This is not an App Tester connection code.');
+      }
+      final host = payload['host'];
+      final port = payload['port'];
+      final targetPackage = payload['package_name'];
+      if (host is! String || port is! int || targetPackage is! String) {
+        throw const FormatException('Connection code is incomplete.');
+      }
+      networkMatch = await _networkMatch(host, port);
+      if (networkMatch == NetworkMatch.unreachable) {
+        error = 'Desktop is not reachable. Connect phone and computer to the same Wi-Fi, then scan again.';
+        notifyListeners();
+        return;
+      }
+      await startVpn(host, port.toString(), targetPackage);
+    } on FormatException catch (exception) {
+      error = exception.message;
+      notifyListeners();
+    } catch (_) {
+      error = 'Could not read this connection code. Scan the code shown by App Tester.';
+      notifyListeners();
+    }
+  }
+
+  Future<NetworkMatch> _networkMatch(String host, int port) async {
+    try {
+      final socket = await Socket.connect(host, port,
+          timeout: const Duration(seconds: 2));
+      await socket.close();
+    } catch (_) {
+      return NetworkMatch.unreachable;
+    }
+    final hostParts = host.split('.');
+    if (hostParts.length != 4) {
+      return NetworkMatch.reachable;
+    }
+    final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
+    final sameSubnet = interfaces.expand((item) => item.addresses).any((address) {
+      final parts = address.address.split('.');
+      return parts.length == 4 &&
+          parts.take(3).join('.') == hostParts.take(3).join('.');
+    });
+    return sameSubnet ? NetworkMatch.sameWifi : NetworkMatch.reachable;
+  }
+
   Future<void> stopVpn() async {
     await _run(_repository.stopVpn);
     _syncRefreshTimer();
@@ -53,7 +108,11 @@ class ProxySafetyViewModel extends ChangeNotifier {
 
   void _syncRefreshTimer() {
     _refreshTimer?.cancel();
-    if (status?.isMonitoring != true && status?.isVpnActive != true) return;
+    if (status?.isMonitoring != true &&
+        status?.isVpnActive != true &&
+        status?.targetPackage == null) {
+      return;
+    }
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 5),
       (_) => _run(_repository.status),
@@ -80,3 +139,5 @@ class ProxySafetyViewModel extends ChangeNotifier {
     }
   }
 }
+
+enum NetworkMatch { unknown, sameWifi, reachable, unreachable }
