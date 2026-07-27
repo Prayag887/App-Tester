@@ -52,6 +52,21 @@ struct CompanionInstall {
     qr_svg: String,
 }
 
+#[derive(serde::Serialize)]
+struct CompanionConnection {
+    payload: String,
+    qr_svg: String,
+}
+
+#[derive(serde::Serialize)]
+struct CompanionConnectionPayload<'a> {
+    protocol: &'static str,
+    version: u8,
+    host: &'a str,
+    port: u16,
+    package_name: &'a str,
+}
+
 struct InspectorState {
     proxy: Arc<ProxyService>,
     database: Arc<Database>,
@@ -119,6 +134,31 @@ fn prepare_companion_install(app: tauri::AppHandle) -> Result<CompanionInstall, 
         install_url,
         qr_svg,
     })
+}
+
+#[tauri::command]
+fn prepare_companion_connection(
+    host: String,
+    package_name: String,
+) -> Result<CompanionConnection, String> {
+    android::validate_companion_connection(&host, &package_name)
+        .map_err(|error| error.to_string())?;
+    let payload = serde_json::to_string(&CompanionConnectionPayload {
+        protocol: "app-tester-companion",
+        version: 1,
+        host: &host,
+        port: 8080,
+        package_name: &package_name,
+    })
+    .map_err(|error| format!("could not encode companion connection: {error}"))?;
+    let qr_svg = qrcode::QrCode::new(payload.as_bytes())
+        .map_err(|error| format!("could not create companion connection QR code: {error}"))?
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(320, 320)
+        .dark_color(qrcode::render::svg::Color("#08110f"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build();
+    Ok(CompanionConnection { payload, qr_svg })
 }
 
 #[tauri::command]
@@ -840,6 +880,7 @@ pub fn run() {
             launch_installed_app,
             begin_qr_pairing,
             prepare_companion_install,
+            prepare_companion_connection,
             install_companion,
             finish_qr_pairing,
             pair_with_code,

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CompanionInstall, HttpTransaction, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary } from "./types";
+import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CompanionConnection, CompanionInstall, HttpTransaction, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary } from "./types";
 const native = () => "__TAURI_INTERNALS__" in window;
 export const discoverDevices = async (): Promise<AndroidDevice[]> => native() ? invoke("discover_devices") : [];
 export const listInstalledApps = async (serial: string): Promise<AndroidApp[]> => invoke("list_installed_apps", { serial });
@@ -33,6 +33,8 @@ export const deleteAllTransactions = async ():Promise<void> => invoke("delete_al
 export const testYesterdaysApis = async ():Promise<ReplaySummary> => invoke("test_yesterdays_apis");
 export const beginQrPairing = async ():Promise<QrPairingChallenge> => invoke("begin_qr_pairing");
 export const prepareCompanionInstall = async ():Promise<CompanionInstall> => invoke("prepare_companion_install");
+export const prepareCompanionConnection = async (host:string, packageName:string):Promise<CompanionConnection> =>
+  invoke("prepare_companion_connection", { host, packageName });
 export const installCompanion = async (serial:string):Promise<string> => invoke("install_companion", { serial });
 export const finishQrPairing = async (pairingId:string):Promise<QrPairingResult> => invoke("finish_qr_pairing",{pairingId});
 export const pairWithCode = async (host:string, port:number, pairingCode:string):Promise<QrPairingResult> =>
