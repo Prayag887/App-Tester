@@ -93,6 +93,7 @@ export function App() {
   const [certificateInstall, setCertificateInstall] = useState<AndroidCertificateInstall>();
   const [companionInstall, setCompanionInstall] = useState<CompanionInstall>();
   const [companionConnection, setCompanionConnection] = useState<CompanionConnection>();
+  const [preparingCompanionConnection, setPreparingCompanionConnection] = useState(false);
   const [installingCompanion, setInstallingCompanion] = useState(false);
   const [caStatus, setCaStatus] = useState<AndroidCaStatus>();
   const [caChanging, setCaChanging] = useState(false);
@@ -262,14 +263,21 @@ export function App() {
     }
   }
   async function openCompanionConnection() {
-    if (!packageName || !desktopHost || desktopHost === "Resolving…") {
-      setNotice("Select an app and wait for the desktop Wi-Fi address.");
+    if (!packageName) {
+      setNotice("Select a package before connecting the companion.");
       return;
     }
+    setPreparingCompanionConnection(true);
+    setNotice("");
     try {
-      setCompanionConnection(await api.prepareCompanionConnection(desktopHost, packageName));
+      const connectionType = devices.find(item => item.serial === device)?.connection_type ?? "usb";
+      const host = await api.getProxyHost(connectionType);
+      setDesktopHost(host);
+      setCompanionConnection(await api.prepareCompanionConnection(host, packageName));
     } catch (error) {
       setNotice(`Could not prepare companion connection: ${String(error)}`);
+    } finally {
+      setPreparingCompanionConnection(false);
     }
   }
   async function installCompanionDirectly() {
@@ -386,8 +394,8 @@ export function App() {
       <button title="Download the Android companion" onClick={()=>void openCompanionInstall()}>
         <ShieldCheck/>Download app
       </button>
-      <button disabled={!packageName} title="Connect the installed companion without USB" onClick={()=>void openCompanionConnection()}>
-        <ShieldCheck/>Connect companion
+      <button disabled={preparingCompanionConnection} title="Connect the installed companion without USB" onClick={()=>void openCompanionConnection()}>
+        <ShieldCheck/>{preparingCompanionConnection ? "Preparing QR…" : "Connect companion"}
       </button>
       <div className={`ca-state ${caStatus?.state ?? "unknown"}`} title={caStatus?.detail ?? "Select a device to inspect CA status"}>
         <ShieldCheck/><span>CA {caStatus?.state.replace("_"," ") ?? "unknown"}</span>
