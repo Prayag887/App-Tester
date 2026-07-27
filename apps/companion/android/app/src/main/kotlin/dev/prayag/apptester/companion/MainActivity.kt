@@ -3,6 +3,7 @@ package dev.prayag.apptester.companion
 import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
+import android.content.pm.PackageManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -18,6 +19,15 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 try {
                     val status = when (call.method) {
+                        "launchableApps" -> {
+                            val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                            val apps = packageManager.queryIntentActivities(launcher, PackageManager.MATCH_ALL)
+                                .map { info -> mapOf("package_name" to info.activityInfo.packageName, "label" to info.loadLabel(packageManager).toString()) }
+                                .distinctBy { it["package_name"] }
+                                .sortedBy { it["label"] }
+                            result.success(apps)
+                            return@setMethodCallHandler
+                        }
                         "status" -> controller.status()
                         "startMonitoring" -> {
                             val host = call.argument<String>("host") ?: error("Desktop host is required.")

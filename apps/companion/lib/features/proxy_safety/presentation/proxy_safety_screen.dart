@@ -37,6 +37,7 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
     await widget.viewModel.connectFromQr(payload);
     if (mounted &&
         widget.viewModel.status?.isVpnActive != true &&
+        widget.viewModel.status?.isMonitoring != true &&
         widget.viewModel.status?.targetPackage == null) {
       await _startScanner();
     }

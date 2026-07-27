@@ -4,7 +4,7 @@ use androidqa_core::{
     events::{EventBroadcaster, InspectorEvent},
     launch_app, list_devices, list_third_party_apps,
     persistence::Database,
-    proxy::{CertificateInfo, ProxyConfiguration, ProxyService, ProxyStatus, generate_ca},
+    proxy::{CertificateInfo, CompanionApp, ProxyConfiguration, ProxyService, ProxyStatus, generate_ca},
     replay::ReplaySummary,
     traffic::HttpTransaction,
 };
@@ -56,6 +56,7 @@ struct CompanionInstall {
 struct CompanionConnection {
     payload: String,
     qr_svg: String,
+    token: String,
 }
 
 #[derive(serde::Serialize)]
@@ -64,7 +65,7 @@ struct CompanionConnectionPayload<'a> {
     version: u8,
     host: &'a str,
     port: u16,
-    package_name: &'a str,
+    token: &'a str,
 }
 
 struct InspectorState {
@@ -139,16 +140,16 @@ fn prepare_companion_install(app: tauri::AppHandle) -> Result<CompanionInstall, 
 #[tauri::command]
 fn prepare_companion_connection(
     host: String,
-    package_name: String,
 ) -> Result<CompanionConnection, String> {
-    android::validate_companion_connection(&host, &package_name)
+    android::validate_companion_connection(&host)
         .map_err(|error| error.to_string())?;
+    let token = Uuid::new_v4().simple().to_string();
     let payload = serde_json::to_string(&CompanionConnectionPayload {
         protocol: "app-tester-companion",
         version: 1,
         host: &host,
         port: 8080,
-        package_name: &package_name,
+        token: &token,
     })
     .map_err(|error| format!("could not encode companion connection: {error}"))?;
     let qr_svg = qrcode::QrCode::new(payload.as_bytes())
@@ -158,7 +159,17 @@ fn prepare_companion_connection(
         .dark_color(qrcode::render::svg::Color("#08110f"))
         .light_color(qrcode::render::svg::Color("#ffffff"))
         .build();
-    Ok(CompanionConnection { payload, qr_svg })
+    Ok(CompanionConnection { payload, qr_svg, token })
+}
+
+#[tauri::command]
+fn list_companion_apps(state: tauri::State<'_, InspectorState>, token: String) -> Vec<CompanionApp> {
+    state.proxy.companion_apps(&token)
+}
+
+#[tauri::command]
+fn select_companion_package(state: tauri::State<'_, InspectorState>, token: String, package_name: String) -> Result<(), String> {
+    state.proxy.select_companion_package(&token, &package_name).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -881,6 +892,8 @@ pub fn run() {
             begin_qr_pairing,
             prepare_companion_install,
             prepare_companion_connection,
+            list_companion_apps,
+            select_companion_package,
             install_companion,
             finish_qr_pairing,
             pair_with_code,

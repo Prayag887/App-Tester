@@ -94,6 +94,7 @@ export function App() {
   const [companionInstall, setCompanionInstall] = useState<CompanionInstall>();
   const [companionConnection, setCompanionConnection] = useState<CompanionConnection>();
   const [preparingCompanionConnection, setPreparingCompanionConnection] = useState(false);
+  const [companionConnected, setCompanionConnected] = useState(false);
   const [installingCompanion, setInstallingCompanion] = useState(false);
   const [caStatus, setCaStatus] = useState<AndroidCaStatus>();
   const [caChanging, setCaChanging] = useState(false);
@@ -159,6 +160,20 @@ export function App() {
     return () => window.removeEventListener("focus", refresh);
   }, [device, devices]);
   useEffect(() => {
+    if (!companionConnection) return;
+    const refresh = () => void api.listCompanionApps(companionConnection.token).then(items => {
+      if (!items.length) return;
+      const remoteApps = items.map(item => ({package_name: item.package_name, version_name: item.label, debuggable: true}));
+      setCompanionConnected(true);
+      setApps(remoteApps);
+      setPackageName(current => remoteApps.some(item => item.package_name === current) ? current : "");
+      setNotice("Companion connected. Select an app, then start capture.");
+    });
+    refresh();
+    const timer = window.setInterval(refresh, 1000);
+    return () => window.clearInterval(timer);
+  }, [companionConnection]);
+  useEffect(() => {
     const connectionType = devices.find(item => item.serial === device)?.connection_type ?? "usb";
     void api.getProxyHost(connectionType)
       .then(setDesktopHost)
@@ -210,14 +225,16 @@ export function App() {
       setSelectedId(undefined);
       setIncidents([]);
       activeSessionId.current = await api.startProxy();
-      if (device) {
+      if (companionConnection && companionConnected) {
+        await api.selectCompanionPackage(companionConnection.token, capturePackage);
+      } else if (device) {
         const selectedDevice = devices.find(item => item.serial === device);
         const host = await api.getProxyHost(selectedDevice?.connection_type ?? "usb");
         setDesktopHost(host);
         await api.configureAndroidProxy(device, host, 8080);
         deviceProxyConfigured = true;
       }
-      if (device) await api.startLogcatCapture(device, capturePackage);
+      if (device && !companionConnected) await api.startLogcatCapture(device, capturePackage);
       setCapturing(true); setNotice("Capture active. Navigate the Android app manually.");
     } catch (error) {
       if (deviceProxyConfigured && device) {
@@ -263,17 +280,18 @@ export function App() {
     }
   }
   async function openCompanionConnection() {
-    if (!packageName) {
-      setNotice("Select a package before connecting the companion.");
-      return;
-    }
     setPreparingCompanionConnection(true);
     setNotice("");
     try {
       const connectionType = devices.find(item => item.serial === device)?.connection_type ?? "usb";
       const host = await api.getProxyHost(connectionType);
       setDesktopHost(host);
-      setCompanionConnection(await api.prepareCompanionConnection(host, packageName));
+      if (proxy !== "running") {
+        activeSessionId.current = await api.startProxy();
+        setProxy("running");
+      }
+      setCompanionConnection(await api.prepareCompanionConnection(host));
+      setCompanionConnected(false);
     } catch (error) {
       setNotice(`Could not prepare companion connection: ${String(error)}`);
     } finally {
@@ -511,9 +529,9 @@ export function App() {
     {companionConnection && <div className="modal-backdrop" role="presentation">
       <section className="qr-dialog connection-dialog" role="dialog" aria-modal="true" aria-labelledby="companion-connect-title">
         <button className="close" aria-label="Close" onClick={()=>setCompanionConnection(undefined)}><X/></button>
-        <div className="qr-heading"><Wifi/><div><h2 id="companion-connect-title">Connect companion</h2><p>One scan. No host, port, or package entry.</p></div></div>
+        <div className="qr-heading"><Wifi/><div><h2 id="companion-connect-title">Connect companion</h2><p>Scan first. Choose the phone app after it connects.</p></div></div>
         <div className="qr-image" dangerouslySetInnerHTML={{__html:companionConnection.qr_svg}} />
-        <p>Open App Tester Companion and scan. Keep phone and computer on same Wi-Fi.</p>
+        <p>Open App Tester Companion and scan. Installed apps will appear in the package picker automatically.</p>
         <button onClick={()=>{setCompanionConnection(undefined); void openCompanionInstall();}}>Install companion instead</button>
       </section>
     </div>}
