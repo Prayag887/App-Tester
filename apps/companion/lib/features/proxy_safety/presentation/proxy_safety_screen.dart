@@ -55,12 +55,16 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
         builder: (context, _) {
           final model = widget.viewModel;
           final active = model.status?.isVpnActive == true;
+          final connected = active || model.status?.isMonitoring == true;
           return Scaffold(
             body: SafeArea(
               child: LayoutBuilder(builder: (context, constraints) {
                 final wide = constraints.maxWidth >= 720;
-                final scanPanel = _ScanPanel(active: active, scanning: _scanning, scanner: _scanner, onDetect: _onDetect);
-                final connectionPanel = _ConnectionPanel(model: model, active: active);
+                final scanPanel = _ScanPanel(active: connected, scanning: _scanning, scanner: _scanner, onDetect: _onDetect);
+                final connectionPanel = _ConnectionPanel(model: model, active: active, connected: connected, onDisconnect: () async {
+                  await model.disconnect();
+                  await _startScanner();
+                });
                 return SingleChildScrollView(
                   padding: EdgeInsets.fromLTRB(wide ? 32 : 18, 18, wide ? 32 : 18, 30),
                   child: Center(
@@ -156,9 +160,11 @@ class _SuccessVisual extends StatelessWidget {
 }
 
 class _ConnectionPanel extends StatelessWidget {
-  const _ConnectionPanel({required this.model, required this.active});
+  const _ConnectionPanel({required this.model, required this.active, required this.connected, required this.onDisconnect});
   final ProxySafetyViewModel model;
   final bool active;
+  final bool connected;
+  final Future<void> Function() onDisconnect;
 
   @override
   Widget build(BuildContext context) {
@@ -176,9 +182,9 @@ class _ConnectionPanel extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Icon(active ? Icons.link_rounded : Icons.qr_code_scanner_rounded, color: active ? const Color(0xff2be0a7) : const Color(0xff82baff), size: 34),
           const SizedBox(height: 16),
-          Text(active ? 'Capture connected' : model.isWorking ? 'Connecting…' : 'Ready to scan', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+          Text(active ? 'Capture connected' : connected ? 'Desktop connected' : model.isWorking ? 'Connecting…' : 'Ready to scan', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 7),
-          Text(active ? 'Traffic is flowing to App Tester. You can leave this screen open or switch apps.' : 'Host, port, and package are configured from the QR code.', style: const TextStyle(color: Color(0xffaebfd8), height: 1.4)),
+          Text(active ? 'Traffic is flowing to App Tester. You can leave this screen open or switch apps.' : connected ? 'Waiting for a package selection from App Tester.' : 'Host and port are configured from the QR code.', style: const TextStyle(color: Color(0xffaebfd8), height: 1.4)),
         ]),
       ),
       const SizedBox(height: 14),
@@ -191,9 +197,9 @@ class _ConnectionPanel extends StatelessWidget {
         const SizedBox(height: 14),
         _ErrorMessage(model.error!),
       ],
-      if (active) ...[
+      if (connected) ...[
         const SizedBox(height: 18),
-        OutlinedButton.icon(onPressed: model.isWorking ? null : model.stopVpn, icon: const Icon(Icons.stop_circle_outlined), label: const Text('Disconnect'), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50))),
+        OutlinedButton.icon(onPressed: model.isWorking ? null : onDisconnect, icon: const Icon(Icons.link_off_rounded), label: const Text('Disconnect from desktop'), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50))),
       ],
     ]);
   }

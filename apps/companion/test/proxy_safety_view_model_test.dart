@@ -57,4 +57,16 @@ void main() {
     expect(repository.armedPort, isNull);
     expect(model.error, contains('1 to 65535'));
   });
+
+  test('disconnects a paired desktop before VPN capture starts', () async {
+    final repository = FakeRepository();
+    final model = ProxySafetyViewModel(repository);
+    await model.startMonitoring('10.10.10.15', '8080');
+
+    await model.disconnect();
+
+    expect(model.status?.isMonitoring, isFalse);
+    expect(model.status?.isVpnActive, isFalse);
+    expect(model.networkMatch, NetworkMatch.unknown);
+  });
 }
