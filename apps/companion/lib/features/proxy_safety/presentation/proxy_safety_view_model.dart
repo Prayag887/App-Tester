@@ -55,15 +55,19 @@ class ProxySafetyViewModel extends ChangeNotifier {
     try {
       final payload = jsonDecode(rawPayload);
       if (payload is! Map<String, dynamic> ||
-          payload['protocol'] != 'app-tester-companion' ||
-          payload['version'] != 1) {
+          payload['protocol'] != 'app-tester-companion') {
         throw const FormatException('This is not an App Tester connection code.');
+      }
+      if (payload['version'] != 2) {
+        throw const FormatException(
+            'Connection code requires another companion version. Update App Tester Companion, then scan again.');
       }
       final host = payload['host'];
       final port = payload['port'];
       final token = payload['token'];
       if (host is! String || port is! int || token is! String) {
-        throw const FormatException('Connection code is incomplete.');
+        throw const FormatException(
+            'Connection code is missing pairing data. Update both App Tester apps, then scan a newly generated code.');
       }
       networkMatch = await _networkMatch(host, port);
       if (networkMatch == NetworkMatch.unreachable) {
