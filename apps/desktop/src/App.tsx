@@ -383,7 +383,10 @@ export function App() {
         onClick={()=>void switchUsbToWifi()}>
         <Wifi/>{enablingUsbWifi ? "Enabling Wi-Fi…" : "USB to Wi-Fi"}
       </button>}
-      <button disabled={!packageName} title="Connect the companion without USB" onClick={()=>void openCompanionConnection()}>
+      <button title="Download the Android companion" onClick={()=>void openCompanionInstall()}>
+        <ShieldCheck/>Download app
+      </button>
+      <button disabled={!packageName} title="Connect the installed companion without USB" onClick={()=>void openCompanionConnection()}>
         <ShieldCheck/>Connect companion
       </button>
       <div className={`ca-state ${caStatus?.state ?? "unknown"}`} title={caStatus?.detail ?? "Select a device to inspect CA status"}>
