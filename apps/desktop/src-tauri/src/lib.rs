@@ -126,7 +126,7 @@ fn begin_qr_pairing(state: tauri::State<'_, InspectorState>) -> Result<QrPairing
 #[tauri::command]
 fn prepare_companion_install(app: tauri::AppHandle) -> Result<CompanionInstall, String> {
     companion_apk_path(&app)?;
-    let install_url = "https://github.com/Prayag887/postman-like/releases/download/v0.1.1/app-tester-companion-0.2.0.apk".to_string();
+    let install_url = "https://github.com/Prayag887/postman-like/releases/download/v0.1.1/app-tester-companion-0.2.1.apk".to_string();
     let qr_svg = qrcode::QrCode::new(install_url.as_bytes())
         .map_err(|error| format!("could not create the companion install QR code: {error}"))?
         .render::<qrcode::render::svg::Color>()
@@ -150,7 +150,7 @@ fn prepare_companion_connection(host: String) -> Result<CompanionConnection, Str
         host: &host,
         port: 8080,
         token: &token,
-        minimum_companion_version: "0.2.0",
+        minimum_companion_version: "0.2.1",
     })
     .map_err(|error| format!("could not encode companion connection: {error}"))?;
     let qr_svg = qrcode::QrCode::new(payload.as_bytes())

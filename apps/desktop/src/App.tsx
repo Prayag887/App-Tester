@@ -549,7 +549,7 @@ export function App() {
     {companionInstall && <div className="modal-backdrop" role="presentation">
       <section className="qr-dialog connection-dialog" role="dialog" aria-modal="true" aria-labelledby="companion-title">
         <button className="close" aria-label="Close" onClick={()=>setCompanionInstall(undefined)}><X/></button>
-        <div className="qr-heading"><ShieldCheck/><div><h2 id="companion-title">Install App Tester Companion 0.2</h2><p>Required for connection-first pairing</p></div></div>
+        <div className="qr-heading"><ShieldCheck/><div><h2 id="companion-title">Install App Tester Companion 0.2.1</h2><p>Includes complete debug-app discovery</p></div></div>
         <div className="qr-image" dangerouslySetInnerHTML={{__html:companionInstall.qr_svg}} />
         <ol><li>Scan this code with the phone camera.</li><li>Download the signed APK from the App Tester GitHub repository.</li><li>Approve Android’s one-time install confirmation, then open the companion.</li></ol>
         {device && <button className="primary submit" disabled={installingCompanion} onClick={()=>void installCompanionDirectly()}>{installingCompanion ? "Installing…" : "Install directly on selected device"}</button>}
