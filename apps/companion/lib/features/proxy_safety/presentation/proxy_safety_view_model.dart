@@ -15,6 +15,7 @@ class ProxySafetyViewModel extends ChangeNotifier {
   String? error;
   NetworkMatch networkMatch = NetworkMatch.unknown;
   Timer? _refreshTimer;
+  Timer? _companionTimer;
 
   Future<void> load() async {
     await _run(_repository.status);
@@ -60,8 +61,8 @@ class ProxySafetyViewModel extends ChangeNotifier {
       }
       final host = payload['host'];
       final port = payload['port'];
-      final targetPackage = payload['package_name'];
-      if (host is! String || port is! int || targetPackage is! String) {
+      final token = payload['token'];
+      if (host is! String || port is! int || token is! String) {
         throw const FormatException('Connection code is incomplete.');
       }
       networkMatch = await _networkMatch(host, port);
@@ -70,7 +71,35 @@ class ProxySafetyViewModel extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      await startVpn(host, port.toString(), targetPackage);
+      final apps = await _repository.launchableApps();
+      final client = HttpClient();
+      final registration = await client.post(host, port, '/__app_tester/companion/register');
+      registration.headers.contentType = ContentType.json;
+      registration.write(jsonEncode({'token': token, 'apps': apps}));
+      final response = await registration.close();
+      await response.drain<void>();
+      if (response.statusCode != HttpStatus.ok) {
+        throw const HttpException('Desktop rejected companion registration.');
+      }
+      client.close();
+      await _run(() => _repository.startMonitoring(host: host, port: port));
+      _companionTimer?.cancel();
+      _companionTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+        if (status?.isVpnActive == true || isWorking) return;
+        final pollClient = HttpClient();
+        try {
+          final request = await pollClient.get(host, port, '/__app_tester/companion/config?token=$token');
+          final result = await request.close();
+          final config = jsonDecode(await utf8.decoder.bind(result).join());
+          final package = config['package_name'];
+          if (package is String && package.isNotEmpty) {
+            _companionTimer?.cancel();
+            await startVpn(host, port.toString(), package);
+          }
+        } finally {
+          pollClient.close();
+        }
+      });
     } on FormatException catch (exception) {
       error = exception.message;
       notifyListeners();
@@ -108,6 +137,7 @@ class ProxySafetyViewModel extends ChangeNotifier {
 
   void _syncRefreshTimer() {
     _refreshTimer?.cancel();
+    _companionTimer?.cancel();
     if (status?.isMonitoring != true &&
         status?.isVpnActive != true &&
         status?.targetPackage == null) {
