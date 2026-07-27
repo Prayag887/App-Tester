@@ -139,6 +139,17 @@ class ProxySafetyViewModel extends ChangeNotifier {
     _syncRefreshTimer();
   }
 
+  Future<void> disconnect() async {
+    _companionTimer?.cancel();
+    if (status?.isVpnActive == true) {
+      await _run(_repository.stopVpn);
+    }
+    await _run(_repository.stopMonitoring);
+    networkMatch = NetworkMatch.unknown;
+    _syncRefreshTimer();
+    notifyListeners();
+  }
+
   void _syncRefreshTimer() {
     _refreshTimer?.cancel();
     _companionTimer?.cancel();

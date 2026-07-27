@@ -57,7 +57,8 @@ class ProxySafetyController(private val context: Context) {
     fun stopMonitoring(message: String = "Desktop link stopped. Direct networking is unchanged."): ProxySafetyStatus {
         context.stopService(Intent(context, ProxySafetyService::class.java))
         record(message)
-        preferences.edit().remove(HOST).remove(PORT).putBoolean(MONITORING, false).apply()
+        preferences.edit().remove(HOST).remove(PORT).remove(TARGET_PACKAGE)
+            .putBoolean(MONITORING, false).putBoolean(VPN_ACTIVE, false).apply()
         return status(message)
     }
 
