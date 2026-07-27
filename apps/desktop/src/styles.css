@@ -98,6 +98,7 @@ pre{background:#101827;border-color:#2d3850;color:#cbd2e3}
 .log-title h2{font-size:15px;margin:0 0 6px}.log-title p{margin:0;color:#b7bfd0;overflow-wrap:anywhere}.log-title time{flex:none;color:#7f899f}
 .detected-at{display:flex;align-items:center;gap:10px;margin:14px 0;padding:9px 11px;border-radius:6px;background:#101827}
 .detected-at span{flex:none;color:#8994aa;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.detected-at code{min-width:0;color:#c9b8f2;overflow-wrap:anywhere}
+.issue-analysis{margin:14px 0;padding:14px;border:1px solid #2a354d;border-radius:7px;background:#111a2b}.issue-analysis h3{margin:10px 0 4px;color:#8d99af;font-size:10px;text-transform:uppercase;letter-spacing:.08em}.issue-analysis h3:first-child{margin-top:0}.issue-analysis p,.issue-analysis ol{margin:0 0 9px;color:#d7ddea;line-height:1.5}.issue-analysis ol{padding-left:20px}.issue-analysis button{margin-top:3px}
 .log-content details{border-top:1px solid #2a354d;padding-top:11px}.log-content summary{cursor:pointer;color:#a993e5}
 .log-content details pre{margin-bottom:0}.log-empty{min-height:330px}
 

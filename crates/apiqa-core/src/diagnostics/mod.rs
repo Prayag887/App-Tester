@@ -42,8 +42,18 @@ pub struct LogIncident {
     pub first_app_frame: Option<String>,
     /// Android activity that was in the foreground while the incident occurred.
     pub foreground_activity: Option<String>,
+    /// Best available code or screen location for a developer.
+    pub where_occurred: String,
+    /// Concise causal chain reconstructed from the log burst.
+    pub how_occurred: String,
+    /// Most likely underlying fault, suitable for issue reports.
+    pub likely_cause: String,
+    /// Deterministic steps that help reproduce the same execution path.
+    pub reproduction_steps: Vec<String>,
     pub lines: Vec<FocusedLogLine>,
     pub occurrence_count: u32,
+    #[serde(with = "time::serde::rfc3339")]
+    pub first_occurred_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     pub occurred_at: OffsetDateTime,
 }
@@ -164,6 +174,26 @@ fn human_title(default_title: &str, root: &str, cause: Option<&str>) -> String {
     }
 }
 
+fn reproduction_steps(
+    category: IncidentCategory,
+    foreground_activity: Option<&str>,
+    root: &str,
+) -> Vec<String> {
+    let mut steps = vec!["Launch the same app build with App Tester capture running.".into()];
+    if let Some(activity) = foreground_activity {
+        steps.push(format!("Navigate to {activity}."));
+    }
+    steps.push(match category {
+        IncidentCategory::Network => "Repeat the network action performed immediately before the failure.".into(),
+        IncidentCategory::DtoParsing => "Repeat the request or screen load that parses the same response payload.".into(),
+        IncidentCategory::Crash => "Repeat the last interaction shown in the evidence until the app exits.".into(),
+        IncidentCategory::Anr => "Repeat the last interaction and leave the screen unchanged until Android reports it as unresponsive.".into(),
+        _ => format!("Repeat the action that produced: {root}"),
+    });
+    steps.push("Confirm the same root cause and first application frame appear in Logcat.".into());
+    steps
+}
+
 pub fn normalize_signature(
     category: IncidentCategory,
     message: &str,
@@ -204,6 +234,24 @@ pub fn parse_incident(
     })?;
     let frame = first_application_frame(&lines, package);
     let cause = causal_exception(&lines);
+    let where_occurred = frame
+        .clone()
+        .or_else(|| foreground_activity.clone())
+        .unwrap_or_else(|| format!("{} (Logcat)", root.tag));
+    let likely_cause = cause.clone().unwrap_or_else(|| root.message.clone());
+    let how_occurred = if let Some(cause) = cause.as_deref() {
+        format!("{} led to {}", root.message.trim(), cause.trim())
+    } else {
+        format!(
+            "Android reported {} while the app was active.",
+            root.message.trim()
+        )
+    };
+    let occurred_at =
+        OffsetDateTime::from_unix_timestamp_nanos(i128::from(root.timestamp_ms) * 1_000_000)
+            .unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let reproduction_steps =
+        reproduction_steps(category, foreground_activity.as_deref(), &root.message);
     Some(LogIncident {
         id: Uuid::new_v4(),
         session_id,
@@ -215,9 +263,14 @@ pub fn parse_incident(
         root_cause: cause,
         first_app_frame: frame,
         foreground_activity,
+        where_occurred,
+        how_occurred,
+        likely_cause,
+        reproduction_steps,
         lines,
         occurrence_count: 1,
-        occurred_at: OffsetDateTime::now_utc(),
+        first_occurred_at: occurred_at,
+        occurred_at,
     })
 }
 
@@ -319,6 +372,14 @@ mod tests {
         assert_eq!(
             incident.foreground_activity.as_deref(),
             Some("com.example/.CheckoutActivity")
+        );
+        assert_eq!(incident.where_occurred, "com.example/.CheckoutActivity");
+        assert!(incident.how_occurred.contains("led to"));
+        assert!(
+            incident
+                .reproduction_steps
+                .iter()
+                .any(|step| step.contains("CheckoutActivity"))
         );
     }
 }

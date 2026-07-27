@@ -1,10 +1,11 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, bodyText, compactEndpoint, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, preferredDevice } from "./App";
+import { App, bodyText, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, preferredDevice } from "./App";
 import { collectTransactionPages } from "./api";
 import type { AndroidDevice, HttpTransaction, LogIncident } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
+const incident = {title:"Checkout crash",category:"crash",occurrence_count:2,first_occurred_at:"2026-07-27T23:59:00Z",occurred_at:"2026-07-28T00:00:00Z",where_occurred:"at com.example.Checkout.submit",summary:"App crashed",how_occurred:"Tap led to null access",likely_cause:"NullPointerException",reproduction_steps:["Open checkout","Tap Pay"],lines:[{timestamp_ms:1,level:"E",tag:"AndroidRuntime",message:"FATAL EXCEPTION"}]} as LogIncident;
 describe("traffic presentation", () => {
   it("shows pending rows immediately", () => expect(displayState(transaction)).toBe("Pending"));
   it("calculates completed duration", () => expect(duration({...transaction,timing:{request_started_ms:100,response_complete_ms:538}})).toBe(438));
@@ -62,5 +63,13 @@ describe("traffic presentation", () => {
     ]} as LogIncident;
     expect(incidentLocation(incident, "com.example")).toBe("com.example/.HomeActivity");
     expect(incidentLocation({...incident,first_app_frame:undefined,foreground_activity:undefined}, "com.example")).toBe("Home · Logcat");
+  });
+});
+describe("developer incident report", () => {
+  it("includes diagnosis, reproduction, and evidence", () => {
+    const report = developerIncidentReport(incident, "com.example");
+    expect(report).toContain("Where: at com.example.Checkout.submit");
+    expect(report).toContain("2. Tap Pay");
+    expect(report).toContain("E AndroidRuntime: FATAL EXCEPTION");
   });
 });

@@ -57,9 +57,10 @@ export interface AndroidCaChange {
   status: AndroidCaStatus; requires_user_confirmation: boolean; rebooting: boolean;
 }
 export interface LogIncident {
-  id: string; category: string; title: string; message: string; occurrence_count: number;
+  id: string; category: string; signature:string; title: string; message: string; occurrence_count: number;
   summary: string; root_cause?: string; foreground_activity?: string;
-  first_app_frame?: string;
-  occurred_at: string; lines: { timestamp_ms:number; level:string; tag:string; message:string }[];
+  first_app_frame?: string; where_occurred:string; how_occurred:string; likely_cause:string;
+  reproduction_steps:string[];
+  first_occurred_at:string; occurred_at: string; lines: { timestamp_ms:number; level:string; tag:string; message:string }[];
 }
 export interface ReplaySummary { attempted:number; completed:number; changed:number; skipped:number; failed:number }
