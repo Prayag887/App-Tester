@@ -41,7 +41,7 @@ class CompanionLogEntry {
 }
 
 abstract interface class ProxySafetyRepository {
-  Future<List<Map<String, String>>> launchableApps();
+  Future<List<Map<String, String>>> installedDebugApps();
   Future<ProxySafetyStatus> status();
   Future<ProxySafetyStatus> startMonitoring({required String host, required int port});
   Future<ProxySafetyStatus> stopMonitoring();

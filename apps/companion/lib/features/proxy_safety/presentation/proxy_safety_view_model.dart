@@ -75,7 +75,7 @@ class ProxySafetyViewModel extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      final apps = await _repository.launchableApps();
+      final apps = await _repository.installedDebugApps();
       final client = HttpClient();
       final registration = await client.post(host, port, '/__app_tester/companion/register');
       registration.headers.contentType = ContentType.json;

@@ -19,11 +19,11 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 try {
                     val status = when (call.method) {
-                        "launchableApps" -> {
-                            val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-                            val apps = packageManager.queryIntentActivities(launcher, PackageManager.MATCH_ALL)
-                                .map { info -> mapOf("package_name" to info.activityInfo.packageName, "label" to info.loadLabel(packageManager).toString()) }
-                                .distinctBy { it["package_name"] }
+                        "installedDebugApps" -> {
+                            @Suppress("DEPRECATION")
+                            val apps = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+                                .filter { info -> info.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 }
+                                .map { info -> mapOf("package_name" to info.packageName, "label" to packageManager.getApplicationLabel(info).toString()) }
                                 .sortedBy { it["label"] }
                             result.success(apps)
                             return@setMethodCallHandler

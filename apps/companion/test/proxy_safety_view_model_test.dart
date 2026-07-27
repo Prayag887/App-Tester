@@ -9,7 +9,7 @@ class FakeRepository implements ProxySafetyRepository {
   int? armedPort;
 
   @override
-  Future<List<Map<String, String>>> launchableApps() async => const [];
+  Future<List<Map<String, String>>> installedDebugApps() async => const [];
 
   @override
   Future<ProxySafetyStatus> startMonitoring(

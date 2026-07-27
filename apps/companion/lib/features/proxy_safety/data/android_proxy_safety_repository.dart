@@ -6,8 +6,8 @@ class AndroidProxySafetyRepository implements ProxySafetyRepository {
   static const _channel = MethodChannel('dev.prayag.apptester/proxy_safety');
 
   @override
-  Future<List<Map<String, String>>> launchableApps() async {
-    final result = await _channel.invokeListMethod<Map<Object?, Object?>>('launchableApps') ?? const [];
+  Future<List<Map<String, String>>> installedDebugApps() async {
+    final result = await _channel.invokeListMethod<Map<Object?, Object?>>('installedDebugApps') ?? const [];
     return result.map((item) => item.map((key, value) => MapEntry('$key', '$value'))).toList();
   }
 
