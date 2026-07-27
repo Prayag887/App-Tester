@@ -4,13 +4,15 @@ use androidqa_core::{
     events::{EventBroadcaster, InspectorEvent},
     launch_app, list_devices, list_third_party_apps,
     persistence::Database,
-    proxy::{CertificateInfo, CompanionApp, ProxyConfiguration, ProxyService, ProxyStatus, generate_ca},
+    proxy::{
+        CertificateInfo, CompanionApp, ProxyConfiguration, ProxyService, ProxyStatus, generate_ca,
+    },
     replay::ReplaySummary,
     traffic::HttpTransaction,
 };
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     net::UdpSocket,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -138,11 +140,8 @@ fn prepare_companion_install(app: tauri::AppHandle) -> Result<CompanionInstall, 
 }
 
 #[tauri::command]
-fn prepare_companion_connection(
-    host: String,
-) -> Result<CompanionConnection, String> {
-    android::validate_companion_connection(&host)
-        .map_err(|error| error.to_string())?;
+fn prepare_companion_connection(host: String) -> Result<CompanionConnection, String> {
+    android::validate_companion_connection(&host).map_err(|error| error.to_string())?;
     let token = Uuid::new_v4().simple().to_string();
     let payload = serde_json::to_string(&CompanionConnectionPayload {
         protocol: "app-tester-companion",
@@ -159,17 +158,31 @@ fn prepare_companion_connection(
         .dark_color(qrcode::render::svg::Color("#08110f"))
         .light_color(qrcode::render::svg::Color("#ffffff"))
         .build();
-    Ok(CompanionConnection { payload, qr_svg, token })
+    Ok(CompanionConnection {
+        payload,
+        qr_svg,
+        token,
+    })
 }
 
 #[tauri::command]
-fn list_companion_apps(state: tauri::State<'_, InspectorState>, token: String) -> Vec<CompanionApp> {
+fn list_companion_apps(
+    state: tauri::State<'_, InspectorState>,
+    token: String,
+) -> Vec<CompanionApp> {
     state.proxy.companion_apps(&token)
 }
 
 #[tauri::command]
-fn select_companion_package(state: tauri::State<'_, InspectorState>, token: String, package_name: String) -> Result<(), String> {
-    state.proxy.select_companion_package(&token, &package_name).map_err(|error| error.to_string())
+fn select_companion_package(
+    state: tauri::State<'_, InspectorState>,
+    token: String,
+    package_name: String,
+) -> Result<(), String> {
+    state
+        .proxy
+        .select_companion_package(&token, &package_name)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -539,32 +552,29 @@ async fn start_logcat_capture(
             return;
         };
         let mut lines = BufReader::new(stdout).lines();
+        let mut context = VecDeque::with_capacity(50);
         let mut pending = Vec::new();
         loop {
-            match tokio::time::timeout(Duration::from_millis(350), lines.next_line()).await {
+            match tokio::time::timeout(Duration::from_millis(700), lines.next_line()).await {
                 Ok(Ok(Some(line))) => {
                     let Some(log_line) =
                         androidqa_core::diagnostics::parse_logcat_epoch_line(&line)
                     else {
                         continue;
                     };
-                    let starts_new_burst = pending.last().is_some_and(
-                        |previous: &androidqa_core::diagnostics::FocusedLogLine| {
-                            log_line.timestamp_ms.saturating_sub(previous.timestamp_ms) > 1_000
-                        },
-                    );
-                    if starts_new_burst {
-                        emit_logcat_incident(
-                            &events,
-                            session_id,
-                            &package_name,
-                            &adb_path,
-                            &serial,
-                            std::mem::take(&mut pending),
-                        )
-                        .await;
+                    let actionable = androidqa_core::diagnostics::classify(&log_line.message)
+                        .is_some()
+                        || matches!(log_line.level.as_str(), "W" | "E" | "F" | "A");
+                    if pending.is_empty() && actionable {
+                        pending.extend(context.iter().cloned());
                     }
-                    pending.push(log_line);
+                    if !pending.is_empty() {
+                        pending.push(log_line.clone());
+                    }
+                    context.push_back(log_line);
+                    if context.len() > 50 {
+                        context.pop_front();
+                    }
                 }
                 Ok(Ok(None)) | Ok(Err(_)) => {
                     emit_logcat_incident(

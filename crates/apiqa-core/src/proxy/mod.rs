@@ -225,16 +225,29 @@ impl HttpHandler for CaptureHandler {
         let (parts, body) = request.into_parts();
         if parts.uri.path() == "/__app_tester/companion/register" {
             let response = match body.collect().await {
-                Ok(collected) => serde_json::from_slice::<CompanionRegistration>(&collected.to_bytes())
-                    .map(|registration| {
-                        self.companion_links.insert(registration.token, CompanionLink {
-                            apps: registration.apps,
-                            selected_package: None,
-                        });
-                        Response::new(Body::from("{\"connected\":true}"))
-                    })
-                    .unwrap_or_else(|_| Response::builder().status(400).body(Body::from("invalid registration")).expect("valid response")),
-                Err(_) => Response::builder().status(400).body(Body::from("invalid body")).expect("valid response"),
+                Ok(collected) => {
+                    serde_json::from_slice::<CompanionRegistration>(&collected.to_bytes())
+                        .map(|registration| {
+                            self.companion_links.insert(
+                                registration.token,
+                                CompanionLink {
+                                    apps: registration.apps,
+                                    selected_package: None,
+                                },
+                            );
+                            Response::new(Body::from("{\"connected\":true}"))
+                        })
+                        .unwrap_or_else(|_| {
+                            Response::builder()
+                                .status(400)
+                                .body(Body::from("invalid registration"))
+                                .expect("valid response")
+                        })
+                }
+                Err(_) => Response::builder()
+                    .status(400)
+                    .body(Body::from("invalid body"))
+                    .expect("valid response"),
             };
             return response.into();
         }
@@ -244,8 +257,11 @@ impl HttpHandler for CaptureHandler {
                     .find(|(name, _)| name == "token")
                     .map(|(_, value)| value.into_owned())
             });
-            let package_name = token.and_then(|token| self.companion_links.get(&token)
-                .and_then(|link| link.selected_package.clone()));
+            let package_name = token.and_then(|token| {
+                self.companion_links
+                    .get(&token)
+                    .and_then(|link| link.selected_package.clone())
+            });
             let body = serde_json::json!({"package_name": package_name}).to_string();
             return Response::new(Body::from(body)).into();
         }
@@ -507,10 +523,15 @@ impl ProxyService {
         self.events.clone()
     }
     pub fn companion_apps(&self, token: &str) -> Vec<CompanionApp> {
-        self.companion_links.get(token).map(|link| link.apps.clone()).unwrap_or_default()
+        self.companion_links
+            .get(token)
+            .map(|link| link.apps.clone())
+            .unwrap_or_default()
     }
     pub fn select_companion_package(&self, token: &str, package_name: &str) -> anyhow::Result<()> {
-        let mut link = self.companion_links.get_mut(token)
+        let mut link = self
+            .companion_links
+            .get_mut(token)
             .ok_or_else(|| anyhow::anyhow!("companion has not connected yet"))?;
         if !link.apps.iter().any(|app| app.package_name == package_name) {
             anyhow::bail!("package was not reported by the companion");

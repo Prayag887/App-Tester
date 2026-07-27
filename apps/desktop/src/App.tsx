@@ -63,7 +63,32 @@ export const preferredDevice = (current: string, devices: AndroidDevice[]) => {
     devices.find(device => device.authorization_status === "authorized")?.serial ?? "";
 };
 export const incidentLocation = (incident: LogIncident, packageName: string) =>
-  incident.foreground_activity ?? incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
+  incident.where_occurred ?? incident.foreground_activity ?? incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
+export const developerIncidentReport = (incident:LogIncident, packageName:string) => `# ${incident.title}
+
+Package: ${packageName || "unknown"}
+Category: ${incident.category}
+Occurrences: ${incident.occurrence_count}
+First seen: ${new Date(incident.first_occurred_at).toISOString()}
+Last seen: ${new Date(incident.occurred_at).toISOString()}
+Where: ${incidentLocation(incident, packageName)}
+
+## What happened
+${incident.summary}
+
+## How it happened
+${incident.how_occurred}
+
+## Likely cause
+${incident.likely_cause}
+
+## Reproduce
+${incident.reproduction_steps.map((step,index)=>`${index+1}. ${step}`).join("\n")}
+
+## Evidence
+\`\`\`
+${incident.lines.map(line=>`${line.level} ${line.tag}: ${line.message}`).join("\n")}
+\`\`\``;
 const jsonView = (value: string) => {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
 };
@@ -129,7 +154,12 @@ export function App() {
           : [e.payload.payload, ...current])),
       listen<{payload: LogIncident}>("incident-created", e => {
         const incident = e.payload.payload;
-        setIncidents(current => [incident, ...current].slice(0, 100));
+        setIncidents(current => {
+          const previous = current.find(item => item.signature === incident.signature);
+          if (!previous) return [incident, ...current].slice(0, 100);
+          const merged = {...incident, id:previous.id, first_occurred_at:previous.first_occurred_at, occurrence_count:previous.occurrence_count + 1};
+          return [merged, ...current.filter(item => item.signature !== incident.signature)].slice(0, 100);
+        });
         setNotice(`Logcat: ${incident.title} — ${incident.summary}`);
       }),
     ];
@@ -587,10 +617,15 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
         <div className="log-severity"><AlertCircle/><span>{incident.category.replaceAll("_"," ")}</span></div>
         <div className="log-content">
           <div className="log-title"><div><h2>{incident.title}</h2><p>{incident.summary}</p>
+            <small>{incident.occurrence_count} occurrence{incident.occurrence_count === 1 ? "" : "s"}</small>
             {incident.root_cause && <small>Root cause: {incident.root_cause}</small>}</div>
             <time>{new Date(incident.occurred_at).toLocaleTimeString()}</time></div>
           <div className="detected-at"><span>Screen &amp; navigation context</span>
             <code>{incidentLocation(incident, packageName)}</code></div>
+          <div className="issue-analysis"><h3>How it happened</h3><p>{incident.how_occurred}</p>
+            <h3>Likely cause</h3><p>{incident.likely_cause}</p>
+            <h3>How to reproduce</h3><ol>{incident.reproduction_steps.map((step,index)=><li key={index}>{step}</li>)}</ol>
+            <button onClick={()=>void navigator.clipboard.writeText(developerIncidentReport(incident, packageName))}><Copy/>Copy developer report</button></div>
           <details><summary>View {incident.lines.length} captured log {incident.lines.length === 1 ? "line" : "lines"}</summary>
             {incident.lines.map((line,index)=><pre key={index}>{line.level} {line.tag}: {line.message}</pre>)}</details>
         </div>
