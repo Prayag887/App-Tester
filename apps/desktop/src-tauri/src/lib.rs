@@ -762,6 +762,49 @@ fn delete_all_transactions(state: tauri::State<'_, InspectorState>) -> Result<()
         .map_err(|error| error.to_string())
 }
 #[tauri::command]
+fn export_capture(state: tauri::State<'_, InspectorState>) -> Result<String, String> {
+    let session_id = (*state
+        .session_id
+        .lock()
+        .map_err(|_| "session lock poisoned")?)
+    .ok_or_else(|| "capture something before exporting".to_owned())?;
+    let transactions = state
+        .database
+        .all_session_transactions(session_id)
+        .map_err(|error| error.to_string())?;
+    androidqa_core::persistence::portable::encode_capture(
+        &androidqa_core::persistence::portable::export_capture(
+            &transactions,
+            OffsetDateTime::now_utc(),
+        ),
+    )
+    .map_err(|error| error.to_string())
+}
+#[tauri::command]
+fn import_capture(
+    state: tauri::State<'_, InspectorState>,
+    payload: String,
+) -> Result<usize, String> {
+    let session_id = Uuid::new_v4();
+    let transactions = androidqa_core::persistence::portable::import_capture(
+        &payload,
+        session_id,
+        OffsetDateTime::now_utc(),
+    )
+    .map_err(|error| error.to_string())?;
+    for transaction in &transactions {
+        state
+            .database
+            .upsert_transaction(transaction)
+            .map_err(|error| error.to_string())?;
+    }
+    *state
+        .session_id
+        .lock()
+        .map_err(|_| "session lock poisoned")? = Some(session_id);
+    Ok(transactions.len())
+}
+#[tauri::command]
 async fn test_yesterdays_apis(
     state: tauri::State<'_, InspectorState>,
 ) -> Result<ReplaySummary, String> {
@@ -929,6 +972,8 @@ pub fn run() {
             verify_android_proxy,
             list_transactions,
             delete_all_transactions,
+            export_capture,
+            import_capture,
             test_yesterdays_apis,
             get_transaction,
             approve_baseline

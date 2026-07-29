@@ -13,7 +13,7 @@ and installer checks.
 | Android connection recovery | Partial | USB disconnect, Wi-Fi handoff, unavailable ADB, authorization failure, and client-isolated Wi-Fi each result in a clear recovery path without leaving a device proxy configured. |
 | Diagnostics | Partial | Logcat monitoring starts, stops, reconnects, and reports actionable incidents for the selected app without collecting unrelated app data. |
 | Comparison workflows | Partial | Users can select, pin, edit, and delete baselines; schema differences have clear, testable semantics. |
-| Data portability | Missing | Users can export a redacted capture and import it into a new local profile without raw secrets or certificate keys. |
+| Data portability | Partial | Redacted metadata export/import is implemented. Verify export and import on each supported desktop installer and add user-directed destination selection before release. |
 | Protocol coverage | Missing | WebSocket behavior, HTTP/2 concurrency, certificate pinning limitations, and HTTP/3 bypasses are either supported and tested or explicitly surfaced before capture starts. |
 | Accessibility and recovery | Partial | Main flows work by keyboard, expose visible focus and semantic labels, and cover loading, empty, permission-denied, disconnected, and retry states. |
 

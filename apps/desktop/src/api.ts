@@ -30,6 +30,8 @@ export const listTransactions = async ():Promise<HttpTransaction[]> => native()
   ? collectTransactionPages((limit, offset) => invoke("list_transactions", {limit, offset}))
   : [];
 export const deleteAllTransactions = async ():Promise<void> => invoke("delete_all_transactions");
+export const exportCapture = async ():Promise<string> => invoke("export_capture");
+export const importCapture = async (payload:string):Promise<number> => invoke("import_capture", {payload});
 export const testYesterdaysApis = async ():Promise<ReplaySummary> => invoke("test_yesterdays_apis");
 export const beginQrPairing = async ():Promise<QrPairingChallenge> => invoke("begin_qr_pairing");
 export const prepareCompanionInstall = async ():Promise<CompanionInstall> => invoke("prepare_companion_install");
