@@ -66,6 +66,7 @@ export const usbWifiHandoff = (endpoint: string, packageName: string, captureAct
   endpoint,
   refreshProxyOwnership: captureActive,
   restartLogcat: captureActive && Boolean(packageName),
+  cleanupDevice: captureActive ? endpoint : undefined,
 });
 export const captureCleanupDevice = (configuredDevice: string | undefined, selectedDevice: string) =>
   configuredDevice || selectedDevice;
@@ -316,12 +317,28 @@ export function App() {
       // app-exit cleanup always target the reachable Wi-Fi endpoint.
       setDevice(handoff.endpoint);
       if (handoff.refreshProxyOwnership) {
-        const host = await api.getProxyHost("wireless");
-        setDesktopHost(host);
-        await api.configureAndroidProxy(handoff.endpoint, host, 8080);
-        configuredCaptureDevice.current = handoff.endpoint;
+        // Once the ADB transport has moved, the USB serial is no longer a safe
+        // cleanup target. Transfer ownership before any operation that can fail.
+        configuredCaptureDevice.current = handoff.cleanupDevice;
+        try {
+          const host = await api.getProxyHost("wireless");
+          setDesktopHost(host);
+          await api.configureAndroidProxy(handoff.endpoint, host, 8080);
+        } catch (handoffError) {
+          const failures: string[] = [];
+          await api.clearAndroidProxy(handoff.endpoint).catch(error => failures.push(String(error)));
+          if (!failures.length) configuredCaptureDevice.current = undefined;
+          await api.stopProxy().catch(error => failures.push(String(error)));
+          setCapturing(false); setPaused(false);
+          throw new Error(failures.length
+            ? `Wi-Fi handoff failed and cleanup needs attention: ${failures.join(" · ")}`
+            : `Wi-Fi handoff failed; capture stopped and the Android proxy was cleared: ${String(handoffError)}`);
+        }
       }
-      if (handoff.restartLogcat) await api.startLogcatCapture(handoff.endpoint, packageName);
+      if (handoff.restartLogcat) {
+        await api.startLogcatCapture(handoff.endpoint, packageName).catch(error =>
+          setNotice(`Capture continues over Wi-Fi, but Logcat could not restart: ${String(error)}`));
+      }
       setNotice(capturing
         ? `Capture continues over Wi-Fi at ${handoff.endpoint}. You can now unplug USB.`
         : `Wi-Fi debugging is ready at ${handoff.endpoint}. Keep the phone and Mac on the same Wi-Fi, then you can unplug USB.`);
