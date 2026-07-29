@@ -15,3 +15,10 @@ playwright-report/
 test-results/
 scan-results/
 .gstack/
+
+# Local assistant and session artifacts. Keep these on the workstation only.
+/AGENTS.md
+/memory/
+/.agent/
+/.agents/
+/.codex/
