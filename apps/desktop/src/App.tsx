@@ -62,6 +62,11 @@ export const preferredDevice = (current: string, devices: AndroidDevice[]) => {
   return devices.find(device => device.connection_type === "usb" && device.authorization_status === "authorized")?.serial ??
     devices.find(device => device.authorization_status === "authorized")?.serial ?? "";
 };
+export const usbWifiHandoff = (endpoint: string, packageName: string, captureActive: boolean) => ({
+  endpoint,
+  refreshProxyOwnership: captureActive,
+  restartLogcat: captureActive && Boolean(packageName),
+});
 export const incidentLocation = (incident: LogIncident, packageName: string) =>
   incident.where_occurred ?? incident.foreground_activity ?? incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
 export const developerIncidentReport = (incident:LogIncident, packageName:string) => `# ${incident.title}
@@ -294,8 +299,23 @@ export function App() {
     setEnablingUsbWifi(true);
     try {
       const result = await api.enableUsbWifi(selectedDevice.serial);
-      setDevice(result.endpoint);
-      setNotice(`Wi-Fi debugging is ready at ${result.endpoint}. Keep the phone and Mac on the same Wi-Fi, then you can unplug USB.`);
+      const handoff = usbWifiHandoff(
+        result.endpoint,
+        packageName,
+        capturing && !companionConnected,
+      );
+      // `adb tcpip` closes the USB transport. Update selection first so Stop and
+      // app-exit cleanup always target the reachable Wi-Fi endpoint.
+      setDevice(handoff.endpoint);
+      if (handoff.refreshProxyOwnership) {
+        const host = await api.getProxyHost("wireless");
+        setDesktopHost(host);
+        await api.configureAndroidProxy(handoff.endpoint, host, 8080);
+      }
+      if (handoff.restartLogcat) await api.startLogcatCapture(handoff.endpoint, packageName);
+      setNotice(capturing
+        ? `Capture continues over Wi-Fi at ${handoff.endpoint}. You can now unplug USB.`
+        : `Wi-Fi debugging is ready at ${handoff.endpoint}. Keep the phone and Mac on the same Wi-Fi, then you can unplug USB.`);
     } catch (error) {
       setNotice(`Could not switch ${selectedDevice.serial} to Wi-Fi: ${String(error)}`);
     } finally {
@@ -434,8 +454,8 @@ export function App() {
       </select>
       {devices.find(item => item.serial === device)?.connection_type === "usb" && <button
         className="wireless-device"
-        disabled={enablingUsbWifi || capturing}
-        title={capturing ? "Stop capture before switching this device to Wi-Fi" : "Keep debugging available after unplugging USB"}
+        disabled={enablingUsbWifi}
+        title="Keep capture and debugging available after unplugging USB"
         onClick={()=>void switchUsbToWifi()}>
         <Wifi/>{enablingUsbWifi ? "Enabling Wi-Fi…" : "USB to Wi-Fi"}
       </button>}

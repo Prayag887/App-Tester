@@ -2,7 +2,11 @@ use crate::{AdbRunner, DeviceError};
 use qrcode::{QrCode, render::svg};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{
+    net::{TcpStream, ToSocketAddrs},
+    path::Path,
+    time::Duration,
+};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -96,6 +100,18 @@ pub fn enable_usb_wifi(
     serial: &str,
     port: u16,
 ) -> Result<QrPairingResult, DeviceError> {
+    let endpoint = prepare_usb_wifi(runner, serial, port)?;
+    connect_usb_wifi(runner, &endpoint)
+}
+
+/// Switches the selected USB device to ADB-over-TCP and returns its endpoint.
+/// Callers can validate local network reachability before starting the ADB
+/// connection handshake.
+pub fn prepare_usb_wifi(
+    runner: &dyn AdbRunner,
+    serial: &str,
+    port: u16,
+) -> Result<String, DeviceError> {
     if port == 0 {
         return Err(DeviceError::Adb(
             "ADB Wi-Fi port must be between 1 and 65535".into(),
@@ -110,15 +126,39 @@ pub fn enable_usb_wifi(
     // `adb tcpip` intentionally tears down the USB transport. Resolve the device address
     // first, while the selected serial is still reachable.
     runner.run(&["-s", serial, "tcpip", &port.to_string()])?;
-    let endpoint = format!("{host}:{port}");
+    Ok(format!("{host}:{port}"))
+}
+
+pub fn connect_usb_wifi(
+    runner: &dyn AdbRunner,
+    endpoint: &str,
+) -> Result<QrPairingResult, DeviceError> {
     let output = runner.run(&["connect", &endpoint])?;
     if !output.to_ascii_lowercase().contains("connected") {
         return Err(DeviceError::Adb(output.trim().to_owned()));
     }
     Ok(QrPairingResult {
-        endpoint,
+        endpoint: endpoint.to_owned(),
         adb_output: output.trim().to_owned(),
     })
+}
+
+/// Verifies that the desktop can reach the ADB TCP listener before attempting
+/// the ADB handshake. Some Wi-Fi access points isolate clients even when both
+/// devices receive addresses in the same subnet; without this check `adb
+/// connect` can appear to hang and leave the capture handoff ambiguous.
+pub fn verify_adb_wifi_endpoint(endpoint: &str, timeout: Duration) -> Result<(), DeviceError> {
+    let address = endpoint
+        .to_socket_addrs()
+        .map_err(|_| DeviceError::Adb("invalid Wi-Fi ADB endpoint".into()))?
+        .find(|address| address.is_ipv4())
+        .ok_or_else(|| DeviceError::Adb("invalid Wi-Fi ADB endpoint".into()))?;
+    TcpStream::connect_timeout(&address, timeout).map_err(|error| {
+        DeviceError::Adb(format!(
+            "the phone's Wi-Fi ADB port is unreachable ({error}). Check that both devices are on the same non-isolated Wi-Fi network; guest/client-isolated networks block USB-to-Wi-Fi capture"
+        ))
+    })?;
+    Ok(())
 }
 
 fn validate_host(host: &str) -> Result<(), DeviceError> {
@@ -424,6 +464,19 @@ studio-app-tester-123 _adb-tls-pairing._tcp 192.168.1.4:42891\n";
                 vec!["connect", "10.10.10.19:5555"],
             ]
         );
+    }
+
+    #[test]
+    fn verifies_that_the_wifi_adb_port_is_reachable() {
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        verify_adb_wifi_endpoint(
+            &listener.local_addr().unwrap().to_string(),
+            Duration::from_secs(1),
+        )
+        .unwrap();
     }
 
     #[test]
