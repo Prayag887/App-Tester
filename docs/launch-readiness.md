@@ -39,10 +39,10 @@ and installer checks.
 
 | Area | Status | Release acceptance criteria |
 | --- | --- | --- |
-| License | Missing | A maintainer-selected OSI-approved license is committed at the repository root. |
-| Contribution path | Missing | `CONTRIBUTING.md` explains setup, checks, style, pull requests, and how to report bugs. |
-| Community standards | Missing | Code of conduct, support guidance, and issue/PR templates are present and maintained. |
-| Governance | Missing | Maintainer roles, decision-making, release ownership, and supported-platform policy are public. |
+| License | Implemented | GPL-3.0 is committed at the repository root and declared in Rust and JavaScript package metadata. |
+| Contribution path | Implemented | `CONTRIBUTING.md` explains setup, checks, pull requests, and how to report bugs. |
+| Community standards | Implemented | Code of conduct, support guidance, and issue/PR templates are present and maintained. |
+| Governance | Implemented | Maintainer roles, decision-making, release ownership, and supported-platform policy are public. |
 
 ## Release decision
 
