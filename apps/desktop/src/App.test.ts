@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, bodyText, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, preferredDevice, usbWifiHandoff } from "./App";
+import { App, bodyText, captureCleanupDevice, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, preferredDevice, usbWifiHandoff } from "./App";
 import { collectTransactionPages } from "./api";
 import type { AndroidDevice, HttpTransaction, LogIncident } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
@@ -43,6 +43,10 @@ describe("traffic presentation", () => {
       endpoint: "192.168.1.44:5555", refreshProxyOwnership: true, restartLogcat: true,
     });
     expect(usbWifiHandoff("192.168.1.44:5555", "", true).restartLogcat).toBe(false);
+  });
+  it("cleans up the device that was configured even if selection changes", () => {
+    expect(captureCleanupDevice("192.168.1.44:5555", "emulator-5554")).toBe("192.168.1.44:5555");
+    expect(captureCleanupDevice(undefined, "emulator-5554")).toBe("emulator-5554");
   });
   it("loads every transaction page instead of truncating the display at 250 hits", async () => {
     const hits = Array.from({length:620}, (_, index) => ({...transaction,id:`tx-${index}`} as HttpTransaction));
