@@ -260,8 +260,11 @@ async fn pair_with_code(
 async fn enable_usb_wifi(serial: String, port: Option<u16>) -> Result<QrPairingResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
-        android::enable_usb_wifi(&adb, &serial, port.unwrap_or(5555))
-            .map_err(|error| error.to_string())
+        let endpoint = android::prepare_usb_wifi(&adb, &serial, port.unwrap_or(5555))
+            .map_err(|error| error.to_string())?;
+        android::verify_adb_wifi_endpoint(&endpoint, Duration::from_secs(5))
+            .map_err(|error| error.to_string())?;
+        android::connect_usb_wifi(&adb, &endpoint).map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| format!("USB Wi-Fi task failed: {error}"))?

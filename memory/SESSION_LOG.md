@@ -42,3 +42,19 @@ meaningful change. See `../AGENTS.md` for the required fields.
   handoff and hosted CI have passed.
 - **Next handoff:** Perform the physical handoff scenario, record the result,
   and then resolve the Flutter SDK access before release qualification.
+
+## 2026-07-29 — Wi-Fi ADB isolation preflight
+
+- **Intent:** Test the USB-to-Wi-Fi capture handoff with a connected phone and
+  prevent an ambiguous/hanging handoff when its ADB port is inaccessible.
+- **Changed:** Added a bounded TCP reachability check between enabling ADB TCP
+  mode and starting `adb connect`, with an actionable client-isolation error.
+- **Verification:** The device listened on port 5555, yet its Wi-Fi endpoint
+  was unreachable from the desktop at link layer. Rust tests pass 33 core tests
+  plus the desktop unit test; desktop checks pass 14 tests and TypeScript.
+- **Risks / follow-up:** Successful Wi-Fi capture cannot be verified until the
+  access point allows device-to-device traffic. The phone was restored to
+  USB-only ADB. Full production qualification remains blocked by local Flutter
+  SDK access and the required network smoke test.
+- **Next handoff:** Use a non-isolated Wi-Fi network, perform the unplugged
+  capture flow, and record result before release qualification.

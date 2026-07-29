@@ -15,9 +15,18 @@
   The existing capture session and proxy remain running.
 - **Regression test:** `apps/desktop/src/App.test.ts` checks that an active
   handoff requires both proxy ownership refresh and logcat restart.
-- **Evidence:** `pnpm --dir apps/desktop check` passes 13 tests and TypeScript
-  validation; `cargo test --workspace` passes 32 tests.
-- **Status:** DONE_WITH_CONCERNS — source-level lifecycle behavior is covered,
-  but final verification requires an authorized physical device on the same
-  Wi-Fi network: start capture over USB, click **USB to Wi-Fi**, wait for the
-  confirmation, unplug USB, generate app traffic, and stop capture.
+- **Physical investigation:** A USB-authorized phone successfully entered ADB
+  TCP mode and listened on port 5555, but the desktop could not reach that port
+  or resolve the phone at link layer while both reported the same Wi-Fi subnet.
+  This conclusively identifies Wi-Fi client/AP isolation, outside the VPN and
+  application layers. The phone was returned to USB-only ADB after the test.
+- **Follow-up fix:** Split TCP-mode preparation from the ADB handshake and
+  verify the endpoint with a five-second TCP preflight first. The app now
+  reports an unreachable/isolation error promptly instead of hanging during
+  `adb connect` or reporting a successful handoff.
+- **Evidence:** `pnpm --dir apps/desktop check` passes 14 tests and TypeScript
+  validation; `cargo test --workspace` passes 33 core tests plus the desktop
+  unit test.
+- **Status:** DONE_WITH_CONCERNS — the failure mode is verified and handled;
+  a successful unplugged-capture smoke test still requires a network that
+  permits direct desktop-to-phone traffic.
