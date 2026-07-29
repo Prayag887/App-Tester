@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "pnpm --dir apps/desktop tauri dev",
     "companion:check": "cd apps/companion && flutter analyze && flutter test",
-    "companion:build": "cd apps/companion && flutter build apk --release",
+    "companion:build": "cd apps/companion && flutter build apk --release && node ../../scripts/sync-companion-release.mjs",
     "desktop:build": "pnpm --dir apps/desktop tauri build",
     "build": "pnpm run companion:build && pnpm run desktop:build",
     "check": "pnpm run qa:production",

@@ -133,7 +133,7 @@ pub fn connect_usb_wifi(
     runner: &dyn AdbRunner,
     endpoint: &str,
 ) -> Result<QrPairingResult, DeviceError> {
-    let output = runner.run(&["connect", &endpoint])?;
+    let output = runner.run(&["connect", endpoint])?;
     if !output.to_ascii_lowercase().contains("connected") {
         return Err(DeviceError::Adb(output.trim().to_owned()));
     }

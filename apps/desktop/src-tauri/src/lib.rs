@@ -207,12 +207,12 @@ fn companion_apk_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .path()
         .resource_dir()
         .map_err(|error| error.to_string())?
-        .join("_up_/_up_/companion/build/app/outputs/flutter-apk/app-release.apk");
+        .join("_up_/_up_/companion/releases/app-tester-companion.apk");
     if bundled.is_file() {
         return Ok(bundled);
     }
     let development = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../companion/build/app/outputs/flutter-apk/app-release.apk");
+        .join("../../companion/releases/app-tester-companion.apk");
     development.is_file().then_some(development).ok_or_else(|| {
         "App Tester Companion has not been built yet. Build apps/companion first.".into()
     })
