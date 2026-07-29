@@ -23,3 +23,22 @@ meaningful change. See `../AGENTS.md` for the required fields.
 - **Next handoff:** Restore access to a trusted Flutter SDK, rerun
   `pnpm qa:production`, then commit this coherent change, push `main`, confirm
   GitHub Actions, and record its result below.
+
+## 2026-07-29 — USB capture to Wi-Fi handoff
+
+- **Intent:** Keep an already active USB desktop capture functional after the
+  phone is moved to Wi-Fi ADB and unplugged, without relying on the companion
+  VPN.
+- **Changed:** Allowed the active-capture handoff, transferred Android proxy
+  cleanup ownership to the Wi-Fi serial, restarted scoped logcat, documented
+  the flow, and added a regression test.
+- **Verification:** Desktop check passes 13 tests and TypeScript validation;
+  workspace Rust tests pass 32 tests. Physical-device verification remains
+  required. The full production gate remains blocked by the inaccessible local
+  Flutter SDK recorded above.
+- **Risks / follow-up:** Legacy ADB-over-TCP/IP requires the phone and desktop
+  to stay on the same Wi-Fi; disconnecting or changing networks still requires
+  reconnection. Do not advertise a release as production-ready before a device
+  handoff and hosted CI have passed.
+- **Next handoff:** Perform the physical handoff scenario, record the result,
+  and then resolve the Flutter SDK access before release qualification.
