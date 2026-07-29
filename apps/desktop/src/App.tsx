@@ -67,6 +67,8 @@ export const usbWifiHandoff = (endpoint: string, packageName: string, captureAct
   refreshProxyOwnership: captureActive,
   restartLogcat: captureActive && Boolean(packageName),
 });
+export const captureCleanupDevice = (configuredDevice: string | undefined, selectedDevice: string) =>
+  configuredDevice || selectedDevice;
 export const incidentLocation = (incident: LogIncident, packageName: string) =>
   incident.where_occurred ?? incident.foreground_activity ?? incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
 export const developerIncidentReport = (incident:LogIncident, packageName:string) => `# ${incident.title}
@@ -131,6 +133,7 @@ export function App() {
   const [incidents, setIncidents] = useState<LogIncident[]>([]);
   const hiddenTransactionIds = useRef(new Set<string>());
   const activeSessionId = useRef<string | undefined>(undefined);
+  const configuredCaptureDevice = useRef<string | undefined>(undefined);
   const importInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -269,12 +272,14 @@ export function App() {
         setDesktopHost(host);
         await api.configureAndroidProxy(device, host, 8080);
         deviceProxyConfigured = true;
+        configuredCaptureDevice.current = device;
       }
       if (device && !companionConnected) await api.startLogcatCapture(device, capturePackage);
       setCapturing(true); setNotice("Capture active. Navigate the Android app manually.");
     } catch (error) {
       if (deviceProxyConfigured && device) {
         await api.clearAndroidProxy(device).catch(() => undefined);
+        configuredCaptureDevice.current = undefined;
       }
       await api.stopProxy().catch(() => undefined);
       if (String(error).includes("CA certificate")) await setupHttpsCapture();
@@ -283,7 +288,9 @@ export function App() {
   }
   async function stop() {
     const failures:string[] = [];
-    if (device) await api.clearAndroidProxy(device).catch(error => failures.push(String(error)));
+    const cleanupDevice = captureCleanupDevice(configuredCaptureDevice.current, device);
+    if (cleanupDevice) await api.clearAndroidProxy(cleanupDevice).catch(error => failures.push(String(error)));
+    if (!failures.length) configuredCaptureDevice.current = undefined;
     await api.stopProxy().catch(error => failures.push(String(error)));
     try {
       setCapturing(false); setPaused(false);
@@ -312,6 +319,7 @@ export function App() {
         const host = await api.getProxyHost("wireless");
         setDesktopHost(host);
         await api.configureAndroidProxy(handoff.endpoint, host, 8080);
+        configuredCaptureDevice.current = handoff.endpoint;
       }
       if (handoff.restartLogcat) await api.startLogcatCapture(handoff.endpoint, packageName);
       setNotice(capturing
