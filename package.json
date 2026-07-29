@@ -9,7 +9,8 @@
     "companion:build": "cd apps/companion && flutter build apk --release",
     "desktop:build": "pnpm --dir apps/desktop tauri build",
     "build": "pnpm run companion:build && pnpm run desktop:build",
-    "check": "pnpm run companion:check && pnpm run companion:build && cargo test --workspace && pnpm --dir apps/desktop check",
+    "check": "pnpm run qa:production",
+    "qa:production": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && pnpm --dir apps/desktop check && pnpm --dir apps/desktop build && pnpm run companion:check && pnpm run companion:build",
     "format": "cargo fmt --all && pnpm --dir apps/desktop format"
   }
 }
