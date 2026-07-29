@@ -69,6 +69,17 @@ impl Database {
             .map(|row| Ok(serde_json::from_str(&row.get::<_, String>(0)?)?))
             .transpose()
     }
+    pub fn all_session_transactions(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<HttpTransaction>, StoreError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT payload_json FROM transactions WHERE session_id=?1 ORDER BY created_at ASC",
+        )?;
+        let rows = statement.query_map([session_id.to_string()], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
     pub fn transactions_between(
         &self,
         start: OffsetDateTime,

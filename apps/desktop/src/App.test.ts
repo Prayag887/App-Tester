@@ -53,6 +53,8 @@ describe("traffic presentation", () => {
   it("renders a Delete all control for clearing captured APIs", () => {
     const markup = renderToStaticMarkup(createElement(App));
     expect(markup).toContain("Delete all");
+    expect(markup).toContain("Export redacted");
+    expect(markup).toContain("Import capture");
     expect(markup).toContain("without deleting saved comparison history");
     expect(markup).toContain("Inspect logs");
     expect(markup).toContain("Toolkit");

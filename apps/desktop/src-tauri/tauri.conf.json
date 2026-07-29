@@ -26,7 +26,7 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"],
-    "resources": ["../../companion/build/app/outputs/flutter-apk/app-release.apk"],
+    "resources": ["../../companion/releases/app-tester-companion.apk"],
     "category": "DeveloperTool",
     "shortDescription": "Local Android traffic and runtime inspector",
     "longDescription": "Inspect Android HTTP traffic, response regressions, and correlated runtime diagnostics locally."

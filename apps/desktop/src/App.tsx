@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Activity, AlertCircle, CalendarDays, Circle, Copy, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Wifi, X } from "lucide-react";
+import { Activity, AlertCircle, CalendarDays, Circle, Copy, Download, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Upload, Wifi, X } from "lucide-react";
 import * as api from "./api";
 import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, CompanionConnection, CompanionInstall, HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
@@ -131,6 +131,7 @@ export function App() {
   const [incidents, setIncidents] = useState<LogIncident[]>([]);
   const hiddenTransactionIds = useRef(new Set<string>());
   const activeSessionId = useRef<string | undefined>(undefined);
+  const importInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void api.getProxyStatus().then(setProxy);
@@ -412,6 +413,35 @@ export function App() {
     setTransactions([]); setSelectedId(undefined); setIncidents([]);
     setNotice("Cleared the API list from this UI session. Saved history remains available for comparisons and returns after restart.");
   }
+  async function exportCurrentCapture() {
+    try {
+      const payload = await api.exportCapture();
+      const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "app-tester-capture.json";
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice("Exported redacted capture metadata. Bodies and cURL are intentionally omitted.");
+    } catch (error) { setNotice(`Could not export capture: ${String(error)}`); }
+  }
+  async function importPortableCapture(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      setNotice("Capture import must be 25 MiB or smaller.");
+      return;
+    }
+    try {
+      const count = await api.importCapture(await file.text());
+      activeSessionId.current = undefined;
+      setTransactions(await api.listTransactions());
+      setSelectedId(undefined);
+      setIncidents([]);
+      setNotice(`Imported ${count} redacted transaction${count === 1 ? "" : "s"} into a new local capture.`);
+    } catch (error) { setNotice(`Could not import capture: ${String(error)}`); }
+  }
   async function testYesterday() {
     if (!window.confirm("Replay every testable API captured yesterday? Requests may include state-changing methods. Requests containing redacted credentials or data are skipped.")) return;
     setConnecting(true);
@@ -488,6 +518,9 @@ export function App() {
       <button className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}><Filter/>Changed only</button>
       <button className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}><AlertCircle/>Errors only</button>
       <button title="Showing today’s captures"><CalendarDays/>Today</button>
+      <button disabled={!transactions.length} onClick={()=>void exportCurrentCapture()}><Download/>Export redacted</button>
+      <input ref={importInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={event=>void importPortableCapture(event)} />
+      <button onClick={()=>importInput.current?.click()}><Upload/>Import capture</button>
       <button className="danger" title="Clear this UI session without deleting saved comparison history"
         onClick={deleteAll}><Trash2/>Delete all</button>
       {capturing ? <><button onClick={()=>setPaused(v=>!v)}>{paused?<Play/>:<Pause/>}{paused?"Resume capture":"Pause capture"}</button>
