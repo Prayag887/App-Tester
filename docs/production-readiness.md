@@ -6,8 +6,8 @@ mean the tested source is buildable and passes static analysis and automated
 tests across the Rust core, desktop UI, and Android companion.
 
 It does **not** certify a release by itself. A release owner must record the
-following manual checks in `memory/SESSION_LOG.md`; any unchecked item makes
-the release not production-ready.
+following manual checks in the release pull request or release notes; any
+unchecked item makes the release not production-ready.
 
 ## Automated gate
 
