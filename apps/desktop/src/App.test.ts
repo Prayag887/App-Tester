@@ -41,8 +41,10 @@ describe("traffic presentation", () => {
   it("keeps an active capture connected when USB hands off to Wi-Fi", () => {
     expect(usbWifiHandoff("192.168.1.44:5555", "com.example.app", true)).toEqual({
       endpoint: "192.168.1.44:5555", refreshProxyOwnership: true, restartLogcat: true,
+      cleanupDevice: "192.168.1.44:5555",
     });
     expect(usbWifiHandoff("192.168.1.44:5555", "", true).restartLogcat).toBe(false);
+    expect(usbWifiHandoff("192.168.1.44:5555", "", false).cleanupDevice).toBeUndefined();
   });
   it("cleans up the device that was configured even if selection changes", () => {
     expect(captureCleanupDevice("192.168.1.44:5555", "emulator-5554")).toBe("192.168.1.44:5555");
