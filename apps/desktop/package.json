@@ -15,7 +15,7 @@
   "dependencies": {
     "@chenglou/pretext": "^0.0.8",
     "@tauri-apps/api": "2.11.1",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.27.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
