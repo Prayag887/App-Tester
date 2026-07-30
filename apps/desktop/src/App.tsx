@@ -75,6 +75,11 @@ export const captureCleanupDevice = (configuredDevice: string | undefined, selec
   configuredDevice || selectedDevice;
 export const incidentLocation = (incident: LogIncident, packageName: string) =>
   incident.where_occurred ?? incident.foreground_activity ?? incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
+export const redactLogMessage = (message:string) => message
+  .replace(/\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}\b/g, "[REDACTED_JWT]")
+  .replace(/("?(?:authorization|access[_-]?token|refresh[_-]?token|firebase(?:authentication|installation)?id|sessionid|session_id|token|mobile_no|username)"?\s*[:=]\s*"?)([^",\s}]+)/gi, "$1[REDACTED]");
+export const logEvidence = (lines:LogIncident["lines"]) =>
+  lines.map(line=>`${line.level} ${line.tag}: ${redactLogMessage(line.message)}`).join("\n");
 export const developerIncidentReport = (incident:LogIncident, packageName:string) => `# ${incident.title}
 
 Package: ${packageName || "unknown"}
@@ -98,7 +103,7 @@ ${incident.reproduction_steps.map((step,index)=>`${index+1}. ${step}`).join("\n"
 
 ## Evidence
 \`\`\`
-${incident.lines.map(line=>`${line.level} ${line.tag}: ${line.message}`).join("\n")}
+${logEvidence(incident.lines)}
 \`\`\``;
 const jsonView = (value: string) => {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
@@ -759,7 +764,7 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
             <h3>How to reproduce</h3><ol>{incident.reproduction_steps.map((step,index)=><li key={index}>{step}</li>)}</ol>
             <button onClick={()=>void navigator.clipboard.writeText(developerIncidentReport(incident, packageName))}><Copy/>Copy developer report</button></div>
           <details><summary>View {incident.lines.length} captured log {incident.lines.length === 1 ? "line" : "lines"}</summary>
-            {incident.lines.map((line,index)=><pre key={index}>{line.level} {line.tag}: {line.message}</pre>)}</details>
+            <div className="log-evidence"><button onClick={()=>void navigator.clipboard.writeText(logEvidence(incident.lines))}><Copy/>Copy redacted evidence</button><pre>{logEvidence(incident.lines)}</pre></div></details>
         </div>
       </article>)}
       {!incidents.length && <div className="empty log-empty"><ShieldCheck/><strong>No issues detected</strong>

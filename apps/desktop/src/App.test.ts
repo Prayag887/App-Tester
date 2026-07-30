@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, baselineKey, bodyText, captureCleanupDevice, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, preferredDevice, usbWifiHandoff } from "./App";
+import { App, baselineKey, bodyText, captureCleanupDevice, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, logEvidence, preferredDevice, redactLogMessage, usbWifiHandoff } from "./App";
 import { collectTransactionPages } from "./api";
 import type { AndroidDevice, HttpTransaction, LogIncident } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
@@ -84,6 +84,11 @@ describe("traffic presentation", () => {
     ]} as LogIncident;
     expect(incidentLocation(incident, "com.example")).toBe("com.example/.HomeActivity");
     expect(incidentLocation({...incident,first_app_frame:undefined,foreground_activity:undefined}, "com.example")).toBe("Home · Logcat");
+  });
+  it("creates one copyable evidence block with sensitive values redacted", () => {
+    const lines = [{timestamp_ms:1,level:"D",tag:"Event",message:"firebaseAuthenticationToken=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature"}];
+    expect(redactLogMessage(lines[0].message)).not.toContain("eyJhbGci");
+    expect(logEvidence(lines)).toBe("D Event: firebaseAuthenticationToken=[REDACTED]");
   });
 });
 describe("developer incident report", () => {
