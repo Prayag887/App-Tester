@@ -6,10 +6,15 @@ import 'package:flutter/foundation.dart';
 
 import '../data/proxy_safety_repository.dart';
 
+typedef CompanionRegistration = Future<void> Function(
+    String host, int port, String token, List<Map<String, String>> apps);
+
 class ProxySafetyViewModel extends ChangeNotifier {
-  ProxySafetyViewModel(this._repository);
+  ProxySafetyViewModel(this._repository, {CompanionRegistration? registerCompanion})
+      : _registerCompanion = registerCompanion ?? _registerWithRetry;
 
   final ProxySafetyRepository _repository;
+  final CompanionRegistration _registerCompanion;
   ProxySafetyStatus? status;
   bool isWorking = false;
   String? error;
@@ -52,6 +57,10 @@ class ProxySafetyViewModel extends ChangeNotifier {
 
   Future<void> connectFromQr(String rawPayload) async {
     if (isWorking) return;
+    isWorking = true;
+    error = null;
+    networkMatch = NetworkMatch.unknown;
+    notifyListeners();
     try {
       final payload = jsonDecode(rawPayload);
       if (payload is! Map<String, dynamic> ||
@@ -70,22 +79,9 @@ class ProxySafetyViewModel extends ChangeNotifier {
             'Connection code is missing pairing data. Update both App Tester apps, then scan a newly generated code.');
       }
       networkMatch = await _networkMatch(host, port);
-      if (networkMatch == NetworkMatch.unreachable) {
-        error = 'Desktop is not reachable. Connect phone and computer to the same Wi-Fi, then scan again.';
-        notifyListeners();
-        return;
-      }
+      notifyListeners();
       final apps = await _repository.installedDebugApps();
-      final client = HttpClient();
-      final registration = await client.post(host, port, '/__app_tester/companion/register');
-      registration.headers.contentType = ContentType.json;
-      registration.write(jsonEncode({'token': token, 'apps': apps}));
-      final response = await registration.close();
-      await response.drain<void>();
-      if (response.statusCode != HttpStatus.ok) {
-        throw const HttpException('Desktop rejected companion registration.');
-      }
-      client.close();
+      await _registerCompanion(host, port, token, apps);
       await _run(() => _repository.startMonitoring(host: host, port: port));
       _companionTimer?.cancel();
       _companionTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
@@ -106,11 +102,37 @@ class ProxySafetyViewModel extends ChangeNotifier {
       });
     } on FormatException catch (exception) {
       error = exception.message;
-      notifyListeners();
+    } on StateError catch (exception) {
+      error = exception.message;
     } catch (_) {
-      error = 'Could not read this connection code. Scan the code shown by App Tester.';
+      error = 'Could not connect to App Tester. Keep both apps open and scan the code again.';
+    } finally {
+      isWorking = false;
       notifyListeners();
     }
+  }
+
+  static Future<void> _registerWithRetry(
+      String host, int port, String token, List<Map<String, String>> apps) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+      try {
+        final registration = await client.post(host, port, '/__app_tester/companion/register');
+        registration.headers.contentType = ContentType.json;
+        registration.write(jsonEncode({'token': token, 'apps': apps}));
+        final response = await registration.close();
+        await response.drain<void>();
+        if (response.statusCode == HttpStatus.ok) return;
+        lastError = HttpException('Desktop rejected companion registration.');
+      } catch (error) {
+        lastError = error;
+      } finally {
+        client.close(force: true);
+      }
+      if (attempt < 2) await Future<void>.delayed(const Duration(milliseconds: 600));
+    }
+    throw StateError('Desktop did not respond yet. Keep both apps open; the companion will retry when you scan again. ${lastError ?? ""}'.trim());
   }
 
   Future<NetworkMatch> _networkMatch(String host, int port) async {

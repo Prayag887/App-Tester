@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:app_tester_companion/features/proxy_safety/data/proxy_safety_repository.dart';
 import 'package:app_tester_companion/features/proxy_safety/presentation/proxy_safety_view_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -68,5 +70,19 @@ void main() {
     expect(model.status?.isMonitoring, isFalse);
     expect(model.status?.isVpnActive, isFalse);
     expect(model.networkMatch, NetworkMatch.unknown);
+  });
+
+  test('shows a connecting state until QR registration completes', () async {
+    final registration = Completer<void>();
+    final model = ProxySafetyViewModel(FakeRepository(), registerCompanion: (_, __, ___, ____) => registration.future);
+
+    final connecting = model.connectFromQr('{"protocol":"app-tester-companion","version":2,"host":"127.0.0.1","port":8080,"token":"token"}');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(model.isWorking, isTrue);
+    registration.complete();
+    await connecting;
+    expect(model.isWorking, isFalse);
+    expect(model.status?.isMonitoring, isTrue);
   });
 }

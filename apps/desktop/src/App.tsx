@@ -83,6 +83,16 @@ export const captureStartupPlan = (
   configureSystemProxy: Boolean(device) && !companionActive && connectionType === "emulator",
   startLogcat: Boolean(device),
 });
+export const captureConnectionLabel = (
+  proxy: ProxyStatus,
+  capturing: boolean,
+  companionPairing: boolean,
+) => {
+  if (capturing) return "Connected · Capturing";
+  if (proxy === "running" && companionPairing) return "Connecting Companion…";
+  if (proxy === "running") return "Proxy ready";
+  return `Proxy ${proxy.replaceAll("_", " ")}`;
+};
 export const incidentLocation = (incident: LogIncident, packageName: string) =>
   incident.where_occurred ?? incident.foreground_activity ?? incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
 export const redactLogMessage = (message:string) => message
@@ -277,6 +287,10 @@ export function App() {
     try {
       if (!capturePackage) {
         setNotice("Select a debuggable package before starting capture.");
+        return;
+      }
+      if (companionConnection && !companionConnected) {
+        setNotice("Companion is still connecting. Keep the phone open until the package picker refreshes, then start capture.");
         return;
       }
       hiddenTransactionIds.current.clear();
@@ -568,7 +582,7 @@ export function App() {
     </aside>
     <section className="shell">
     <header>
-      <div className={`proxy ${proxy}`}><Circle/>{proxy === "running" ? "Connected · Capturing automatically" : `Proxy ${proxy.replaceAll("_"," ")}`}</div>
+      <div className={`proxy ${proxy}`}><Circle/>{captureConnectionLabel(proxy, capturing, Boolean(companionConnection && !companionConnected))}</div>
       <select aria-label="Device" value={device} onChange={e=>setDevice(e.target.value)}>
         <option value="">Select device</option>{devices.map(item=><option key={item.serial}>{item.serial}</option>)}
       </select>

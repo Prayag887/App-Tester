@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, baselineKey, bodyText, captureCleanupDevice, captureStartupPlan, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, logEvidence, preferredDevice, redactLogMessage, usbWifiHandoff } from "./App";
+import { App, baselineKey, bodyText, captureCleanupDevice, captureConnectionLabel, captureStartupPlan, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, logEvidence, preferredDevice, redactLogMessage, usbWifiHandoff } from "./App";
 import { collectTransactionPages } from "./api";
 import type { AndroidDevice, HttpTransaction, LogIncident } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
@@ -66,6 +66,11 @@ describe("traffic presentation", () => {
       configureSystemProxy: true,
       startLogcat: true,
     });
+  });
+  it("does not call a ready or pairing proxy an active capture", () => {
+    expect(captureConnectionLabel("running", false, true)).toBe("Connecting Companion…");
+    expect(captureConnectionLabel("running", false, false)).toBe("Proxy ready");
+    expect(captureConnectionLabel("running", true, false)).toBe("Connected · Capturing");
   });
   it("cleans up the device that was configured even if selection changes", () => {
     expect(captureCleanupDevice("192.168.1.44:5555", "emulator-5554")).toBe("192.168.1.44:5555");
