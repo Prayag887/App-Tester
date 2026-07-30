@@ -628,6 +628,24 @@ impl ProxyService {
                 events.send(InspectorEvent::ProxyStatusChanged(ProxyStatus::Failed));
             }
         });
+        // `Proxy::start` binds in its background task. Do not expose a QR code
+        // until that listener is genuinely reachable; otherwise a port conflict
+        // can make the Companion register with an unrelated local process.
+        let ready = (0..40).any(|_| {
+            if task.is_finished()
+                || TcpStream::connect_timeout(&bind_address, Duration::from_millis(50)).is_ok()
+            {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+            false
+        });
+        if !ready || task.is_finished() {
+            let _ = shutdown_tx.send(());
+            let _ = task.await;
+            self.set_status(ProxyStatus::Failed);
+            anyhow::bail!("capture proxy did not become reachable at {bind_address}");
+        }
         *self.shutdown.lock().expect("shutdown lock") = Some(shutdown_tx);
         *self.task.lock().expect("task lock") = Some(task);
         self.set_status(ProxyStatus::Running);
