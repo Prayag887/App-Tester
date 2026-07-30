@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.2] - 2026-07-30
+
+### Added
+
+- Safer capture import and export with redacted metadata and replay safeguards.
+- More resilient USB-to-Wi-Fi ADB handoff and proxy/CA cleanup recovery.
+
+### Changed
+
+- Log incidents now present a single copyable, redacted evidence block.
+- TLS reports select the actual certificate failure and give certificate-specific reproduction guidance.
+
 ## [0.1.1] - 2026-07-26
 
 ### Added
