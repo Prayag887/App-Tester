@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.3] - 2026-07-30
+
+### Fixed
+
+- Desktop release builds now package the committed, signed Companion APK instead of attempting an unsigned CI rebuild.
+
 ## [0.1.2] - 2026-07-30
 
 ### Added
