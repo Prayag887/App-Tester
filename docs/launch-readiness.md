@@ -35,6 +35,28 @@ and installer checks.
 | Update and rollback | Missing | Releases document update behavior, installer provenance, rollback steps, and support windows. |
 | Release notes | Partial | Every release states user-visible changes, migration notes, known limitations, and security-impacting changes. |
 
+## Current evidence
+
+The following checks were completed locally on 2026-07-30 for commit
+`4328f16` before its documentation update:
+
+- Android 17 emulator (`emulator-5554`) discovery, capture startup, fallback
+  from an occupied local proxy port, scoped HTTP(S) capture, comparison output,
+  Logcat incident reporting, and proxy cleanup were exercised. Cleanup was
+  confirmed by checking that the Android global proxy returned to `:0`.
+- The rebuilt Companion was installed on that emulator. It opens to an
+  explicit **Scan connection code** action without requesting camera access on
+  launch. Flutter analysis and its test suite passed with Flutter 3.44.7.
+- The macOS ARM64 DMG was built, checksum-verified when mounted, launched from
+  the mounted image, quit cleanly, and ejected.
+- `pnpm qa:production` passed locally: formatting, clippy, Rust tests, desktop
+  tests/type-check/build, Companion analysis/tests, and debug APK build.
+
+This evidence reduces the outstanding device and installer work but does not
+change any status to **Implemented**: CI must pass for the exact pushed commit,
+Windows/Linux and macOS Intel installers still require native smoke tests, and
+the remaining checklist acceptance criteria must be demonstrated.
+
 ## Open-source project health
 
 | Area | Status | Release acceptance criteria |

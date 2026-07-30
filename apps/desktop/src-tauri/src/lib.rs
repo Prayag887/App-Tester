@@ -1,6 +1,7 @@
 use androidqa_core::{
     AdbRunner, AndroidApp, AndroidDevice, ProcessAdb, android,
     android::{AndroidCertificateInstall, QrPairingChallenge, QrPairingResult, QrPairingSecret},
+    comparison::ComparisonRules,
     events::{EventBroadcaster, InspectorEvent},
     launch_app, list_devices, list_third_party_apps,
     persistence::Database,
@@ -141,14 +142,17 @@ fn prepare_companion_install(app: tauri::AppHandle) -> Result<CompanionInstall, 
 }
 
 #[tauri::command]
-fn prepare_companion_connection(host: String) -> Result<CompanionConnection, String> {
+fn prepare_companion_connection(
+    state: tauri::State<'_, InspectorState>,
+    host: String,
+) -> Result<CompanionConnection, String> {
     android::validate_companion_connection(&host).map_err(|error| error.to_string())?;
     let token = Uuid::new_v4().simple().to_string();
     let payload = serde_json::to_string(&CompanionConnectionPayload {
         protocol: "app-tester-companion",
         version: 2,
         host: &host,
-        port: 8080,
+        port: state.proxy.configuration().port,
         token: &token,
         minimum_companion_version: "0.2.2",
     })
@@ -484,7 +488,7 @@ fn get_proxy_status(state: tauri::State<'_, InspectorState>) -> ProxyStatus {
 }
 #[tauri::command]
 fn get_proxy_configuration(state: tauri::State<'_, InspectorState>) -> ProxyConfiguration {
-    state.proxy.configuration().clone()
+    state.proxy.configuration()
 }
 #[tauri::command]
 fn generate_ca_certificate(
@@ -537,75 +541,89 @@ async fn start_logcat_capture(
     let adb_path = adb.path().to_path_buf();
     let events = state.proxy.events();
     let task = tauri::async_runtime::spawn(async move {
-        let mut child = match Command::new(&adb_path)
-            .args([
-                "-s",
-                &serial,
-                "logcat",
-                &format!("--uid={uid}"),
-                "-v",
-                "epoch",
-            ])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(_) => return,
-        };
-        let Some(stdout) = child.stdout.take() else {
-            return;
-        };
-        let mut lines = BufReader::new(stdout).lines();
-        let mut context = VecDeque::with_capacity(50);
-        let mut pending = Vec::new();
+        let mut reconnect_delay = Duration::from_secs(1);
         loop {
-            match tokio::time::timeout(Duration::from_millis(700), lines.next_line()).await {
-                Ok(Ok(Some(line))) => {
-                    let Some(log_line) =
-                        androidqa_core::diagnostics::parse_logcat_epoch_line(&line)
-                    else {
-                        continue;
-                    };
-                    let actionable = androidqa_core::diagnostics::classify(&log_line.message)
-                        .is_some()
-                        || matches!(log_line.level.as_str(), "W" | "E" | "F" | "A");
-                    if pending.is_empty() && actionable {
-                        pending.extend(context.iter().cloned());
-                    }
-                    if !pending.is_empty() {
-                        pending.push(log_line.clone());
-                    }
-                    context.push_back(log_line);
-                    if context.len() > 50 {
-                        context.pop_front();
-                    }
+            let mut child = match Command::new(&adb_path)
+                .args([
+                    "-s",
+                    &serial,
+                    "logcat",
+                    &format!("--uid={uid}"),
+                    "-v",
+                    "epoch",
+                ])
+                .kill_on_drop(true)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(_) => {
+                    tokio::time::sleep(reconnect_delay).await;
+                    reconnect_delay = (reconnect_delay * 2).min(Duration::from_secs(15));
+                    continue;
                 }
-                Ok(Ok(None)) | Ok(Err(_)) => {
-                    emit_logcat_incident(
-                        &events,
-                        session_id,
-                        &package_name,
-                        &adb_path,
-                        &serial,
-                        pending,
-                    )
-                    .await;
-                    break;
+            };
+            let Some(stdout) = child.stdout.take() else {
+                tokio::time::sleep(reconnect_delay).await;
+                reconnect_delay = (reconnect_delay * 2).min(Duration::from_secs(15));
+                continue;
+            };
+            reconnect_delay = Duration::from_secs(1);
+            let mut lines = BufReader::new(stdout).lines();
+            let mut context = VecDeque::with_capacity(50);
+            let mut pending = Vec::new();
+            loop {
+                match tokio::time::timeout(Duration::from_millis(700), lines.next_line()).await {
+                    Ok(Ok(Some(line))) => {
+                        let Some(log_line) =
+                            androidqa_core::diagnostics::parse_logcat_epoch_line(&line)
+                        else {
+                            continue;
+                        };
+                        let actionable = androidqa_core::diagnostics::classify(&log_line.message)
+                            .is_some()
+                            || matches!(log_line.level.as_str(), "W" | "E" | "F" | "A");
+                        if pending.is_empty() && actionable {
+                            pending.extend(context.iter().cloned());
+                        }
+                        if !pending.is_empty() {
+                            pending.push(log_line.clone());
+                        }
+                        context.push_back(log_line);
+                        if context.len() > 50 {
+                            context.pop_front();
+                        }
+                    }
+                    Ok(Ok(None)) | Ok(Err(_)) => {
+                        emit_logcat_incident(
+                            &events,
+                            session_id,
+                            &package_name,
+                            &adb_path,
+                            &serial,
+                            pending,
+                        )
+                        .await;
+                        break;
+                    }
+                    Err(_) if !pending.is_empty() => {
+                        emit_logcat_incident(
+                            &events,
+                            session_id,
+                            &package_name,
+                            &adb_path,
+                            &serial,
+                            std::mem::take(&mut pending),
+                        )
+                        .await;
+                    }
+                    Err(_) => {}
                 }
-                Err(_) if !pending.is_empty() => {
-                    emit_logcat_incident(
-                        &events,
-                        session_id,
-                        &package_name,
-                        &adb_path,
-                        &serial,
-                        std::mem::take(&mut pending),
-                    )
-                    .await;
-                }
-                Err(_) => {}
             }
+            let _ = child.wait().await;
+            tokio::time::sleep(reconnect_delay).await;
+            reconnect_delay = (reconnect_delay * 2).min(Duration::from_secs(15));
         }
     });
     *previous = Some(task);
@@ -781,6 +799,20 @@ fn export_capture(state: tauri::State<'_, InspectorState>) -> Result<String, Str
     .map_err(|error| error.to_string())
 }
 #[tauri::command]
+fn export_capture_to_file(state: tauri::State<'_, InspectorState>) -> Result<String, String> {
+    let payload = export_capture(state)?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Export redacted App Tester capture")
+        .add_filter("JSON", &["json"])
+        .set_file_name("app-tester-capture.json")
+        .save_file()
+    else {
+        return Err("export canceled".into());
+    };
+    std::fs::write(&path, payload).map_err(|error| format!("could not write export: {error}"))?;
+    Ok(path.display().to_string())
+}
+#[tauri::command]
 fn import_capture(
     state: tauri::State<'_, InspectorState>,
     payload: String,
@@ -883,6 +915,42 @@ fn approve_baseline(
         .approve_baseline(&endpoint_id, transaction_id)
         .map_err(|e| e.to_string())
 }
+#[tauri::command]
+fn delete_baseline(
+    state: tauri::State<'_, InspectorState>,
+    endpoint_id: String,
+) -> Result<bool, String> {
+    state
+        .database
+        .delete_baseline(&endpoint_id)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn get_comparison_rules(
+    state: tauri::State<'_, InspectorState>,
+    endpoint_id: String,
+) -> Result<ComparisonRules, String> {
+    state
+        .database
+        .comparison_rules(&endpoint_id)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn save_comparison_rules(
+    state: tauri::State<'_, InspectorState>,
+    endpoint_id: String,
+    ignored_json_pointers: Vec<String>,
+    volatile_keys: Vec<String>,
+) -> Result<(), String> {
+    let rules = ComparisonRules {
+        ignored_json_pointers: ignored_json_pointers.into_iter().collect(),
+        volatile_keys: volatile_keys.into_iter().collect(),
+    };
+    state
+        .database
+        .save_comparison_rules(&endpoint_id, &rules)
+        .map_err(|e| e.to_string())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -973,10 +1041,14 @@ pub fn run() {
             list_transactions,
             delete_all_transactions,
             export_capture,
+            export_capture_to_file,
             import_capture,
             test_yesterdays_apis,
             get_transaction,
-            approve_baseline
+            approve_baseline,
+            delete_baseline,
+            get_comparison_rules,
+            save_comparison_rules
         ])
         .build(tauri::generate_context!())
         .expect("failed to build App Tester")

@@ -17,12 +17,6 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
   final _scanner = MobileScannerController(autoStart: false);
   bool _scanning = false;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _startScanner());
-  }
-
   Future<void> _startScanner() async {
     if (_scanning || widget.viewModel.status?.isVpnActive == true) return;
     setState(() => _scanning = true);
@@ -35,12 +29,6 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
     await _scanner.stop();
     if (mounted) setState(() => _scanning = false);
     await widget.viewModel.connectFromQr(payload);
-    if (mounted &&
-        widget.viewModel.status?.isVpnActive != true &&
-        widget.viewModel.status?.isMonitoring != true &&
-        widget.viewModel.status?.targetPackage == null) {
-      await _startScanner();
-    }
   }
 
   @override
@@ -60,10 +48,15 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
             body: SafeArea(
               child: LayoutBuilder(builder: (context, constraints) {
                 final wide = constraints.maxWidth >= 720;
-                final scanPanel = _ScanPanel(active: connected, scanning: _scanning, scanner: _scanner, onDetect: _onDetect);
+                final scanPanel = _ScanPanel(
+                  active: connected,
+                  scanning: _scanning,
+                  scanner: _scanner,
+                  onDetect: _onDetect,
+                  onStart: _startScanner,
+                );
                 final connectionPanel = _ConnectionPanel(model: model, active: active, connected: connected, onDisconnect: () async {
                   await model.disconnect();
-                  await _startScanner();
                 });
                 return SingleChildScrollView(
                   padding: EdgeInsets.fromLTRB(wide ? 32 : 18, 18, wide ? 32 : 18, 30),
@@ -106,11 +99,12 @@ class _Header extends StatelessWidget {
 }
 
 class _ScanPanel extends StatelessWidget {
-  const _ScanPanel({required this.active, required this.scanning, required this.scanner, required this.onDetect});
+  const _ScanPanel({required this.active, required this.scanning, required this.scanner, required this.onDetect, required this.onStart});
   final bool active;
   final bool scanning;
   final MobileScannerController scanner;
   final void Function(BarcodeCapture) onDetect;
+  final Future<void> Function() onStart;
 
   @override
   Widget build(BuildContext context) => AnimatedSwitcher(
@@ -122,16 +116,23 @@ class _ScanPanel extends StatelessWidget {
                 const SizedBox(height: 6),
                 const Text('Open App Tester on your computer, select an app, then choose Connect companion.', style: TextStyle(color: Color(0xffaebfd8), height: 1.4)),
                 const SizedBox(height: 18),
-                AspectRatio(
-                  aspectRatio: 1,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: Stack(fit: StackFit.expand, children: [
-                      if (scanning) MobileScanner(controller: scanner, onDetect: onDetect) else const ColoredBox(color: Color(0xff0d1d35)),
-                      const _ScannerFrame(),
-                    ]),
+                if (scanning)
+                  AspectRatio(
+                    aspectRatio: 1,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: Stack(fit: StackFit.expand, children: [
+                        MobileScanner(controller: scanner, onDetect: onDetect),
+                        const _ScannerFrame(),
+                      ]),
+                    ),
+                  )
+                else
+                  FilledButton.icon(
+                    onPressed: () => onStart(),
+                    icon: const Icon(Icons.qr_code_scanner_rounded),
+                    label: const Text('Scan connection code'),
                   ),
-                ),
               ]),
       );
 }

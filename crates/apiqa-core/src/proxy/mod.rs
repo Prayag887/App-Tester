@@ -17,9 +17,10 @@ use hudsucker::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    net::SocketAddr,
+    net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use time::OffsetDateTime;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -126,6 +127,12 @@ fn headers(map: &hudsucker::hyper::HeaderMap) -> Vec<HeaderEntry> {
 }
 fn version(version: hudsucker::hyper::Version) -> String {
     format!("{version:?}")
+}
+pub fn baseline_key(endpoint: &EndpointIdentity) -> String {
+    format!(
+        "{} {} {}",
+        endpoint.method, endpoint.host, endpoint.path_template
+    )
 }
 fn body_storage(bytes: &[u8], limit: usize) -> BodyStorage {
     if bytes.is_empty() {
@@ -387,17 +394,23 @@ impl HttpHandler for CaptureHandler {
                 .get(&current_id)?
                 .endpoint_identity
                 .clone()?;
-            self.transactions
-                .iter()
-                .filter(|entry| entry.id != current_id && entry.response.is_some())
-                .filter(|entry| {
-                    entry.endpoint_identity.as_ref().is_some_and(|candidate| {
-                        crate::comparison::compatibility(&endpoint, candidate)
-                            != crate::comparison::ComparisonCompatibility::Incompatible
-                    })
+            self.database
+                .pinned_baseline(&baseline_key(&endpoint))
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    self.transactions
+                        .iter()
+                        .filter(|entry| entry.id != current_id && entry.response.is_some())
+                        .filter(|entry| {
+                            entry.endpoint_identity.as_ref().is_some_and(|candidate| {
+                                crate::comparison::compatibility(&endpoint, candidate)
+                                    != crate::comparison::ComparisonCompatibility::Incompatible
+                            })
+                        })
+                        .max_by_key(|entry| entry.updated_at)
+                        .map(|entry| entry.clone())
                 })
-                .max_by_key(|entry| entry.updated_at)
-                .map(|entry| entry.clone())
         });
         if let Some(id) = self.current_id
             && let Some(mut transaction) = self.transactions.get_mut(&id)
@@ -456,11 +469,12 @@ impl HttpHandler for CaptureHandler {
                             .bytes()
                             .and_then(|body| serde_json::from_slice(body).ok()),
                     ) {
-                        differences.extend(crate::comparison::compare_json(
-                            &before,
-                            &after,
-                            &crate::comparison::ComparisonRules::default(),
-                        ));
+                        let rules = self
+                            .database
+                            .comparison_rules(&baseline_key(current_endpoint))
+                            .unwrap_or_default();
+                        differences
+                            .extend(crate::comparison::compare_json(&before, &after, &rules));
                     }
                 }
                 transaction.comparison = Some(crate::comparison::ResponseComparison {
@@ -488,7 +502,7 @@ impl HttpHandler for CaptureHandler {
 
 pub struct ProxyService {
     status: Arc<Mutex<ProxyStatus>>,
-    config: ProxyConfiguration,
+    config: Mutex<ProxyConfiguration>,
     database: Arc<Database>,
     events: EventBroadcaster,
     transactions: Arc<DashMap<Uuid, HttpTransaction>>,
@@ -504,7 +518,7 @@ impl ProxyService {
     ) -> Self {
         Self {
             status: Arc::new(Mutex::new(ProxyStatus::Stopped)),
-            config,
+            config: Mutex::new(config),
             database,
             events,
             transactions: Arc::new(DashMap::new()),
@@ -516,8 +530,8 @@ impl ProxyService {
     pub fn status(&self) -> ProxyStatus {
         *self.status.lock().expect("proxy status lock")
     }
-    pub fn configuration(&self) -> &ProxyConfiguration {
-        &self.config
+    pub fn configuration(&self) -> ProxyConfiguration {
+        self.config.lock().expect("proxy config lock").clone()
     }
     pub fn events(&self) -> EventBroadcaster {
         self.events.clone()
@@ -548,15 +562,40 @@ impl ProxyService {
             return Ok(());
         }
         self.set_status(ProxyStatus::Starting);
-        let ca_dir = self
-            .config
+        let mut config = self.configuration();
+        let ca_dir = config
             .ca_certificate_path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("invalid CA path"))?;
-        if !self.config.ca_certificate_path.exists() {
+        if !config.ca_certificate_path.exists() {
             self.set_status(ProxyStatus::CertificateRequired);
             anyhow::bail!("CA certificate is required");
         }
+        let initial_port = config.port;
+        let Some(port) = (initial_port..initial_port.saturating_add(10)).find(|port| {
+            TcpStream::connect_timeout(
+                &SocketAddr::from(([127, 0, 0, 1], *port)),
+                Duration::from_millis(100),
+            )
+            .is_err()
+        }) else {
+            self.set_status(ProxyStatus::Failed);
+            anyhow::bail!(
+                "no capture proxy port is available between {initial_port} and {}",
+                initial_port.saturating_add(9)
+            );
+        };
+        config.port = port;
+        *self.config.lock().expect("proxy config lock") = config.clone();
+        let bind_address: SocketAddr =
+            format!("{}:{}", config.bind_address, config.port).parse()?;
+        // Hudsucker binds when its background task starts. Reserve the address
+        // first so a port conflict is returned to the caller before any Android
+        // device is configured to route traffic to a proxy that never started.
+        std::net::TcpListener::bind(bind_address).map_err(|error| {
+            self.set_status(ProxyStatus::Failed);
+            anyhow::anyhow!("could not bind capture proxy at {bind_address}: {error}")
+        })?;
         let ca = load_authority(ca_dir)?;
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let handler = CaptureHandler {
@@ -569,10 +608,7 @@ impl ProxyService {
             companion_links: self.companion_links.clone(),
         };
         let proxy = Proxy::builder()
-            .with_addr(
-                format!("{}:{}", self.config.bind_address, self.config.port)
-                    .parse::<SocketAddr>()?,
-            )
+            .with_addr(bind_address)
             .with_ca(ca)
             .with_rustls_connector(aws_lc_rs::default_provider())
             .with_http_handler(handler)
@@ -634,5 +670,17 @@ mod tests {
         assert!(info.certificate_path.exists());
         assert_eq!(info.fingerprint_sha256.len(), 64);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn baseline_key_uses_the_normalized_endpoint_identity() {
+        let endpoint = EndpointIdentity {
+            method: "GET".into(),
+            host: "api.example.test".into(),
+            path_template: "/users/{id}".into(),
+            content_type: Some("application/json".into()),
+            request_shape: None,
+        };
+        assert_eq!(baseline_key(&endpoint), "GET api.example.test /users/{id}");
     }
 }

@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CompanionApp, CompanionConnection, CompanionInstall, HttpTransaction, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary } from "./types";
+import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, ComparisonRules, CompanionApp, CompanionConnection, CompanionInstall, HttpTransaction, ProxyConfiguration, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary } from "./types";
 const native = () => "__TAURI_INTERNALS__" in window;
 export const discoverDevices = async (): Promise<AndroidDevice[]> => native() ? invoke("discover_devices") : [];
 export const listInstalledApps = async (serial: string): Promise<AndroidApp[]> => invoke("list_installed_apps", { serial });
 export const launchInstalledApp = async (serial: string, packageName: string): Promise<void> => invoke("launch_installed_app", { serial, packageName });
 export const getProxyStatus = async (): Promise<ProxyStatus> => native() ? invoke("get_proxy_status") : "stopped";
 export const startProxy = async (): Promise<string> => invoke("start_proxy");
+export const getProxyConfiguration = async (): Promise<ProxyConfiguration> => invoke("get_proxy_configuration");
 export const stopProxy = async (): Promise<void> => invoke("stop_proxy");
 export const startLogcatCapture = async (serial:string, packageName:string):Promise<void> =>
   invoke("start_logcat_capture", { serial, packageName });
@@ -31,8 +32,17 @@ export const listTransactions = async ():Promise<HttpTransaction[]> => native()
   : [];
 export const deleteAllTransactions = async ():Promise<void> => invoke("delete_all_transactions");
 export const exportCapture = async ():Promise<string> => invoke("export_capture");
+export const exportCaptureToFile = async ():Promise<string> => invoke("export_capture_to_file");
 export const importCapture = async (payload:string):Promise<number> => invoke("import_capture", {payload});
 export const testYesterdaysApis = async ():Promise<ReplaySummary> => invoke("test_yesterdays_apis");
+export const approveBaseline = async (endpointId:string, transactionId:string):Promise<void> =>
+  invoke("approve_baseline", { endpointId, transactionId });
+export const deleteBaseline = async (endpointId:string):Promise<boolean> =>
+  invoke("delete_baseline", { endpointId });
+export const getComparisonRules = async (endpointId:string):Promise<ComparisonRules> =>
+  invoke("get_comparison_rules", { endpointId });
+export const saveComparisonRules = async (endpointId:string, rules:ComparisonRules):Promise<void> =>
+  invoke("save_comparison_rules", { endpointId, ignoredJsonPointers:rules.ignored_json_pointers, volatileKeys:rules.volatile_keys });
 export const beginQrPairing = async ():Promise<QrPairingChallenge> => invoke("begin_qr_pairing");
 export const prepareCompanionInstall = async ():Promise<CompanionInstall> => invoke("prepare_companion_install");
 export const prepareCompanionConnection = async (host:string):Promise<CompanionConnection> =>

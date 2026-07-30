@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Activity, AlertCircle, CalendarDays, Circle, Copy, Download, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Upload, Wifi, X } from "lucide-react";
 import * as api from "./api";
-import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, CompanionConnection, CompanionInstall, HttpTransaction, LogIncident, ProxyStatus } from "./types";
+import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, ComparisonRules, CompanionConnection, CompanionInstall, HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
 type InspectorTab = "Overview" | "Request" | "Response" | "Compare" | "cURL" | "Logs" | "Timeline";
 type Screen = "toolkit" | "logs";
@@ -23,6 +23,9 @@ export const displayState = (tx: HttpTransaction) => {
 };
 export const fullEndpoint = (tx: HttpTransaction) =>
   `${tx.request.scheme}://${tx.request.host}${tx.request.path}`;
+export const baselineKey = (tx: HttpTransaction) => tx.endpoint_identity
+  ? `${tx.endpoint_identity.method} ${tx.endpoint_identity.host} ${tx.endpoint_identity.path_template}`
+  : undefined;
 export const compactEndpoint = (endpoint: string) => {
   const withoutProtocol = endpoint.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
   const slash = withoutProtocol.indexOf("/");
@@ -265,13 +268,14 @@ export function App() {
       setSelectedId(undefined);
       setIncidents([]);
       activeSessionId.current = await api.startProxy();
+      const proxyConfiguration = await api.getProxyConfiguration();
       if (companionConnection && companionConnected) {
         await api.selectCompanionPackage(companionConnection.token, capturePackage);
       } else if (device) {
         const selectedDevice = devices.find(item => item.serial === device);
         const host = await api.getProxyHost(selectedDevice?.connection_type ?? "usb");
         setDesktopHost(host);
-        await api.configureAndroidProxy(device, host, 8080);
+        await api.configureAndroidProxy(device, host, proxyConfiguration.port);
         deviceProxyConfigured = true;
         configuredCaptureDevice.current = device;
       }
@@ -323,7 +327,8 @@ export function App() {
         try {
           const host = await api.getProxyHost("wireless");
           setDesktopHost(host);
-          await api.configureAndroidProxy(handoff.endpoint, host, 8080);
+          const proxyConfiguration = await api.getProxyConfiguration();
+          await api.configureAndroidProxy(handoff.endpoint, host, proxyConfiguration.port);
         } catch (handoffError) {
           const failures: string[] = [];
           await api.clearAndroidProxy(handoff.endpoint).catch(error => failures.push(String(error)));
@@ -433,22 +438,29 @@ export function App() {
       setCaChanging(false);
     }
   }
-  function deleteAll() {
-    transactions.forEach(transaction => hiddenTransactionIds.current.add(transaction.id));
-    setTransactions([]); setSelectedId(undefined); setIncidents([]);
-    setNotice("Cleared the API list from this UI session. Saved history remains available for comparisons and returns after restart.");
+  async function deleteAll() {
+    if (!window.confirm("Permanently delete every saved capture, comparison baseline, and diagnostic record from this computer? This cannot be undone.")) return;
+    setConnecting(true);
+    try {
+      await api.deleteAllTransactions();
+      hiddenTransactionIds.current.clear();
+      setTransactions([]); setSelectedId(undefined); setIncidents([]);
+      activeSessionId.current = undefined;
+      setNotice("Permanently deleted all saved capture data from this computer.");
+    } catch (error) {
+      setNotice(`Could not delete saved capture data: ${String(error)}`);
+    } finally {
+      setConnecting(false);
+    }
   }
   async function exportCurrentCapture() {
     try {
-      const payload = await api.exportCapture();
-      const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "app-tester-capture.json";
-      link.click();
-      URL.revokeObjectURL(url);
-      setNotice("Exported redacted capture metadata. Bodies and cURL are intentionally omitted.");
-    } catch (error) { setNotice(`Could not export capture: ${String(error)}`); }
+      const path = await api.exportCaptureToFile();
+      setNotice(`Exported redacted capture metadata to ${path}. Bodies and cURL are intentionally omitted.`);
+    } catch (error) {
+      if (String(error).includes("export canceled")) return;
+      setNotice(`Could not export capture: ${String(error)}`);
+    }
   }
   async function importPortableCapture(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -466,6 +478,26 @@ export function App() {
       setIncidents([]);
       setNotice(`Imported ${count} redacted transaction${count === 1 ? "" : "s"} into a new local capture.`);
     } catch (error) { setNotice(`Could not import capture: ${String(error)}`); }
+  }
+  async function pinBaseline(tx: HttpTransaction) {
+    const endpointId = baselineKey(tx);
+    if (!endpointId || !tx.response) { setNotice("Only completed requests with a recognized endpoint can become baselines."); return; }
+    setConnecting(true);
+    try {
+      await api.approveBaseline(endpointId, tx.id);
+      setNotice("Pinned this response as the baseline for future compatible captures.");
+    } catch (error) { setNotice(`Could not pin baseline: ${String(error)}`); }
+    finally { setConnecting(false); }
+  }
+  async function removeBaseline(tx: HttpTransaction) {
+    const endpointId = baselineKey(tx);
+    if (!endpointId) return;
+    setConnecting(true);
+    try {
+      const removed = await api.deleteBaseline(endpointId);
+      setNotice(removed ? "Removed the pinned baseline for this endpoint." : "No pinned baseline exists for this endpoint.");
+    } catch (error) { setNotice(`Could not remove baseline: ${String(error)}`); }
+    finally { setConnecting(false); }
   }
   async function testYesterday() {
     if (!window.confirm("Replay every testable API captured yesterday? Requests may include state-changing methods. Requests containing redacted credentials or data are skipped.")) return;
@@ -514,10 +546,10 @@ export function App() {
         onClick={()=>void switchUsbToWifi()}>
         <Wifi/>{enablingUsbWifi ? "Enabling Wi-Fi…" : "USB to Wi-Fi"}
       </button>}
-      <button title="Download the Android companion" onClick={()=>void openCompanionInstall()}>
+      <button aria-label="Download Android companion" title="Download the Android companion" onClick={()=>void openCompanionInstall()}>
         <ShieldCheck/>Download app
       </button>
-      <button disabled={preparingCompanionConnection} title="Connect the installed companion without USB" onClick={()=>void openCompanionConnection()}>
+      <button aria-label="Connect Android companion" disabled={preparingCompanionConnection} title="Connect the installed companion without USB" onClick={()=>void openCompanionConnection()}>
         <ShieldCheck/>{preparingCompanionConnection ? "Preparing QR…" : "Connect companion"}
       </button>
       <div className={`ca-state ${caStatus?.state ?? "unknown"}`} title={caStatus?.detail ?? "Select a device to inspect CA status"}>
@@ -532,22 +564,22 @@ export function App() {
         <option value="">{appsLoading ? "Loading dev packages…" : "Select dev package"}</option>
         {apps.map(app=><option key={app.package_name}>{app.package_name}</option>)}
       </select>
-      <button title="Settings"><Settings/></button>
+      <button aria-label="Settings" title="Settings"><Settings/></button>
     </header>
     {screen === "toolkit" ? <><section className="screen-heading">
       <div><span>Toolkit</span><h1>API traffic</h1></div>
       <p><span className="desktop-host">Desktop host: {desktopHost}</span>Only traffic from the current <b>{packageName || "selected package"}</b> capture is shown.</p>
     </section>
     <section className="filters">
-      <label className="search"><Search/><input placeholder="Search method, host, path, status…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
-      <button className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}><Filter/>Changed only</button>
-      <button className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}><AlertCircle/>Errors only</button>
+      <label className="search"><Search/><input aria-label="Search captured traffic" placeholder="Search method, host, path, status…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
+      <button aria-pressed={changedOnly} className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}><Filter/>Changed only</button>
+      <button aria-pressed={errorsOnly} className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}><AlertCircle/>Errors only</button>
       <button title="Showing today’s captures"><CalendarDays/>Today</button>
       <button disabled={!transactions.length} onClick={()=>void exportCurrentCapture()}><Download/>Export redacted</button>
       <input ref={importInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={event=>void importPortableCapture(event)} />
       <button onClick={()=>importInput.current?.click()}><Upload/>Import capture</button>
-      <button className="danger" title="Clear this UI session without deleting saved comparison history"
-        onClick={deleteAll}><Trash2/>Delete all</button>
+      <button className="danger" title="Permanently delete all saved capture data from this computer"
+        onClick={()=>void deleteAll()}><Trash2/>Delete all</button>
       {capturing ? <><button onClick={()=>setPaused(v=>!v)}>{paused?<Play/>:<Pause/>}{paused?"Resume capture":"Pause capture"}</button>
         <button className="danger" onClick={()=>void stop()}><Square/>Stop capture</button></> :
         <button className="primary" onClick={()=>void start()}><Play/>Start capture</button>}
@@ -579,7 +611,7 @@ export function App() {
       </div>
       <button title="Add exclusion" disabled={!excludeInput.trim()} onClick={addExclusion}><SlidersHorizontal/>Exclude</button>
     </section>
-    {notice && <div className="notice">{notice}</div>}
+    {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
     <section className="workspace">
       <div className="traffic">
         <div className="cache-alert"><AlertCircle/><span><b>Schema comparison</b> · Changes are detected from JSON keys and types, not values.</span></div>
@@ -600,13 +632,13 @@ export function App() {
       </div>
       <aside className="inspector">
         {selected ? <><div className="inspector-title"><div><b>{selected.request.method}</b><strong>{selected.request.host}{selected.request.path}</strong></div>
-          <button onClick={()=>copy(`${selected.request.scheme}://${selected.request.host}${selected.request.path}`)}><Copy/>URL</button></div>
+          <button aria-label="Copy request URL" onClick={()=>copy(`${selected.request.scheme}://${selected.request.host}${selected.request.path}`)}><Copy/>URL</button></div>
           <nav>{(["Overview","Request","Response","Compare","cURL","Logs","Timeline"] as InspectorTab[]).map(name=>
             <button className={tab===name?"active":""} onClick={()=>setTab(name)} key={name}>{name}</button>)}</nav>
           <div className="panel">{tab==="Overview" && <Overview tx={selected}/>}
             {tab==="Request" && <Message headers={selected.request.headers} body={bodyText(selected.request.body)} onCopy={copy}/>}
             {tab==="Response" && <Message headers={selected.response?.headers ?? []} body={bodyText(selected.response?.body)} onCopy={copy}/>}
-            {tab==="Compare" && <Compare tx={selected}/>}
+            {tab==="Compare" && <Compare tx={selected} onPin={()=>void pinBaseline(selected)} onRemove={()=>void removeBaseline(selected)}/>}
             {tab==="cURL" && <Code value={selected.curl?.multiline ?? "cURL is generated when the request is captured."} onCopy={copy}/>}
             {tab==="Logs" && <Logs incidents={incidents.filter(incident => selected.correlated_incidents.includes(incident.id))}/>}
             {tab==="Timeline" && <Timeline tx={selected}/>}</div>
@@ -657,8 +689,30 @@ function Message({headers,body,onCopy}:{headers:{name:string;value:string}[];bod
     <h3>Body <button onClick={()=>onCopy(body)}><Copy/>Copy raw</button></h3><pre>{jsonView(body) || "No body"}</pre></>;
 }
 function Code({value,onCopy}:{value:string;onCopy:(v:string)=>void}) { return <div className="code"><button onClick={()=>onCopy(value)}><Copy/>Copy</button><pre>{value}</pre></div>; }
-function Compare({tx}:{tx:HttpTransaction}) { const diffs=tx.comparison?.differences ?? []; return <div className="compare-panel">
+function Compare({tx,onPin,onRemove}:{tx:HttpTransaction;onPin:()=>void;onRemove:()=>void}) {
+  const diffs=tx.comparison?.differences ?? [];
+  const endpointId = baselineKey(tx);
+  const canPin=Boolean(endpointId && tx.response);
+  const [rules, setRules] = useState<ComparisonRules>({ignored_json_pointers:[], volatile_keys:[]});
+  const [rulesMessage, setRulesMessage] = useState("");
+  useEffect(() => {
+    if (!endpointId) { setRules({ignored_json_pointers:[], volatile_keys:[]}); return; }
+    void api.getComparisonRules(endpointId).then(setRules).catch(() => setRulesMessage("Could not load comparison rules."));
+  }, [endpointId]);
+  const saveRules = async () => {
+    if (!endpointId) return;
+    try { await api.saveComparisonRules(endpointId, rules); setRulesMessage("Rules saved for future comparisons."); }
+    catch (error) { setRulesMessage(`Could not save rules: ${String(error)}`); }
+  };
+  return <div className="compare-panel">
   <div className="compare-toolbar"><div><b>DTO schema comparison</b><span>Values and array lengths are ignored</span></div><span className="compare-mode">Key structure</span></div>
+  <div className="compare-toolbar"><span>{tx.comparison?.baseline_transaction_id ? "Compared with a saved or recent baseline" : "No saved baseline selected"}</span>
+    <div><button disabled={!canPin} onClick={onPin}>Pin as baseline</button><button disabled={!canPin} onClick={onRemove}>Remove baseline</button></div></div>
+  <section className="comparison-rules"><h3>Comparison rules</h3><p>Ignore exact JSON paths or volatile key names for this endpoint.</p>
+    <label>Ignored JSON paths<input aria-label="Ignored JSON paths" value={rules.ignored_json_pointers.join(", ")} onChange={event=>setRules(current=>({...current,ignored_json_pointers:event.target.value.split(",").map(value=>value.trim()).filter(Boolean)}))} placeholder="$.updatedAt, $.meta.requestId"/></label>
+    <label>Volatile key names<input aria-label="Volatile key names" value={rules.volatile_keys.join(", ")} onChange={event=>setRules(current=>({...current,volatile_keys:event.target.value.split(",").map(value=>value.trim()).filter(Boolean)}))} placeholder="timestamp, requestId"/></label>
+    <button disabled={!endpointId} onClick={()=>void saveRules()}>Save rules</button>{rulesMessage && <span>{rulesMessage}</span>}
+  </section>
   <h3>{diffs.length ? `${diffs.length} schema differences` : tx.comparison?.baseline_transaction_id ? "DTO shape unchanged" : "No compatible comparison available"}</h3>
   {diffs.map((diff,i)=><article className={`diff ${diff.severity}`} key={i}><b>{diff.path ?? diff.kind}</b><span>{diff.explanation}</span>
     <pre>Previous: {diff.previous ?? "—"}{"\n"}Current: {diff.current ?? "—"}</pre></article>)}</div>; }
