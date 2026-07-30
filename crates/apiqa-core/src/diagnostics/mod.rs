@@ -69,8 +69,23 @@ pub fn parse_logcat_epoch_line(line: &str) -> Option<FocusedLogLine> {
         timestamp_ms: (captures.name("timestamp")?.as_str().parse::<f64>().ok()? * 1000.0) as i64,
         level: captures.name("level")?.as_str().to_owned(),
         tag: captures.name("tag")?.as_str().trim().to_owned(),
-        message: captures.name("message")?.as_str().to_owned(),
+        message: redact_log_message(captures.name("message")?.as_str()),
     })
+}
+
+/// Redacts authentication and analytics values before Logcat reaches storage,
+/// the UI, or a copied developer report.
+pub fn redact_log_message(message: &str) -> String {
+    let jwt =
+        Regex::new(r"\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}\b").expect("valid JWT pattern");
+    let sensitive_value = Regex::new(
+        r#"(?i)(\"?(?:authorization|access[_-]?token|refresh[_-]?token|firebase(?:authentication|installation)?id|sessionid|session_id|token|mobile_no|username)\"?\s*[:=]\s*\"?)([^\",\s}]+)"#,
+    )
+    .expect("valid sensitive log value pattern");
+    let without_jwts = jwt.replace_all(message, "[REDACTED_JWT]");
+    sensitive_value
+        .replace_all(&without_jwts, "${1}[REDACTED]")
+        .into_owned()
 }
 
 pub fn classify(message: &str) -> Option<(IncidentCategory, &'static str)> {
@@ -174,14 +189,27 @@ fn human_title(default_title: &str, root: &str, cause: Option<&str>) -> String {
     }
 }
 
+fn is_tls_trust_failure(root: &str, cause: Option<&str>) -> bool {
+    format!("{root}\n{}", cause.unwrap_or(""))
+        .to_ascii_lowercase()
+        .contains("trust anchor for certification path not found")
+}
+
 fn reproduction_steps(
     category: IncidentCategory,
     foreground_activity: Option<&str>,
     root: &str,
+    cause: Option<&str>,
 ) -> Vec<String> {
     let mut steps = vec!["Launch the same app build with App Tester capture running.".into()];
     if let Some(activity) = foreground_activity {
         steps.push(format!("Navigate to {activity}."));
+    }
+    if is_tls_trust_failure(root, cause) {
+        steps.push("Repeat the affected screen load or remote-configuration refresh; this failure can occur automatically during app startup.".into());
+        steps.push("Verify that the App Tester CA is installed and trusted by this app's Android network-security policy, then retry the same action.".into());
+        steps.push("Confirm Logcat reports CertPathValidatorException with \"Trust anchor for certification path not found\".".into());
+        return steps;
     }
     steps.push(match category {
         IncidentCategory::Network => "Repeat the network action performed immediately before the failure.".into(),
@@ -222,16 +250,16 @@ pub fn parse_incident(
     lines: Vec<FocusedLogLine>,
     foreground_activity: Option<String>,
 ) -> Option<LogIncident> {
-    let (root, category, title) = lines.iter().find_map(|line| {
-        if let Some((category, title)) = classify(&line.message) {
-            return Some((line, category, title));
-        }
-        match line.level.as_str() {
-            "E" | "F" | "A" => Some((line, IncidentCategory::Error, "Error")),
-            "W" => Some((line, IncidentCategory::Warning, "Warning")),
-            _ => None,
-        }
-    })?;
+    let (root, category, title) = lines
+        .iter()
+        .find_map(|line| classify(&line.message).map(|(category, title)| (line, category, title)))
+        .or_else(|| {
+            lines.iter().find_map(|line| match line.level.as_str() {
+                "E" | "F" | "A" => Some((line, IncidentCategory::Error, "Error")),
+                "W" => Some((line, IncidentCategory::Warning, "Warning")),
+                _ => None,
+            })
+        })?;
     let frame = first_application_frame(&lines, package);
     let cause = causal_exception(&lines);
     let where_occurred = frame
@@ -250,8 +278,12 @@ pub fn parse_incident(
     let occurred_at =
         OffsetDateTime::from_unix_timestamp_nanos(i128::from(root.timestamp_ms) * 1_000_000)
             .unwrap_or_else(|_| OffsetDateTime::now_utc());
-    let reproduction_steps =
-        reproduction_steps(category, foreground_activity.as_deref(), &root.message);
+    let reproduction_steps = reproduction_steps(
+        category,
+        foreground_activity.as_deref(),
+        &root.message,
+        cause.as_deref(),
+    );
     Some(LogIncident {
         id: Uuid::new_v4(),
         session_id,
@@ -306,6 +338,51 @@ mod tests {
         assert_eq!(
             classify(&line.message).unwrap().0,
             IncidentCategory::Network
+        );
+    }
+
+    #[test]
+    fn redacts_sensitive_values_before_a_log_line_is_exposed() {
+        let line = parse_logcat_epoch_line(
+            "1721932411.123 10491 10502 D Event: firebaseAuthenticationToken=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature mobile_no: 9860590030",
+        )
+        .unwrap();
+        assert!(!line.message.contains("eyJhbGci"));
+        assert!(!line.message.contains("9860590030"));
+        assert!(line.message.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn prefers_a_classified_tls_failure_over_an_earlier_generic_warning() {
+        let line = |level: &str, tag: &str, message: &str| FocusedLogLine {
+            timestamp_ms: 1,
+            level: level.into(),
+            tag: tag.into(),
+            message: message.into(),
+        };
+        let incident = parse_incident(
+            Uuid::new_v4(),
+            "com.example",
+            vec![
+                line("W", "FCM", "FCM service not available yet (attempt 2/3)"),
+                line("E", "SessionConfigFetcher", "Error failing to fetch remote configs: java.security.cert.CertPathValidatorException: Trust anchor for certification path not found."),
+            ],
+            Some("com.example/.MainActivity".into()),
+        )
+        .unwrap();
+        assert_eq!(incident.title, "TLS certificate not trusted");
+        assert!(incident.how_occurred.contains("CertPathValidatorException"));
+        assert!(
+            incident
+                .reproduction_steps
+                .iter()
+                .any(|step| step.contains("remote-configuration refresh"))
+        );
+        assert!(
+            !incident
+                .reproduction_steps
+                .iter()
+                .any(|step| step.contains("attempt 2/3"))
         );
     }
 
