@@ -73,6 +73,10 @@ export const usbWifiHandoff = (endpoint: string, packageName: string, captureAct
 });
 export const captureCleanupDevice = (configuredDevice: string | undefined, selectedDevice: string) =>
   configuredDevice || selectedDevice;
+export const captureStartupPlan = (device: string, companionActive: boolean) => ({
+  configureSystemProxy: Boolean(device) && !companionActive,
+  startLogcat: Boolean(device),
+});
 export const incidentLocation = (incident: LogIncident, packageName: string) =>
   incident.where_occurred ?? incident.foreground_activity ?? incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
 export const redactLogMessage = (message:string) => message
@@ -263,6 +267,7 @@ export function App() {
   async function start(packageOverride?: string) {
     const capturePackage = packageOverride ?? packageName;
     let deviceProxyConfigured = false;
+    let logcatWarning = "";
     try {
       if (!capturePackage) {
         setNotice("Select a debuggable package before starting capture.");
@@ -272,11 +277,13 @@ export function App() {
       setTransactions([]);
       setSelectedId(undefined);
       setIncidents([]);
+      const companionActive = Boolean(companionConnection && companionConnected);
+      const capturePlan = captureStartupPlan(device, companionActive);
       activeSessionId.current = await api.startProxy();
       const proxyConfiguration = await api.getProxyConfiguration();
-      if (companionConnection && companionConnected) {
+      if (companionActive && companionConnection) {
         await api.selectCompanionPackage(companionConnection.token, capturePackage);
-      } else if (device) {
+      } else if (capturePlan.configureSystemProxy) {
         const selectedDevice = devices.find(item => item.serial === device);
         const host = await api.getProxyHost(selectedDevice?.connection_type ?? "usb");
         setDesktopHost(host);
@@ -284,8 +291,13 @@ export function App() {
         deviceProxyConfigured = true;
         configuredCaptureDevice.current = device;
       }
-      if (device && !companionConnected) await api.startLogcatCapture(device, capturePackage);
-      setCapturing(true); setNotice("Capture active. Navigate the Android app manually.");
+      if (capturePlan.startLogcat) {
+        await api.startLogcatCapture(device, capturePackage).catch(error => {
+          logcatWarning = ` Capture is active, but Log Inspector could not start: ${String(error)}`;
+        });
+      }
+      setCapturing(true);
+      setNotice(`Capture active for ${capturePackage}. Navigate that Android app manually.${logcatWarning}`);
     } catch (error) {
       if (deviceProxyConfigured && device) {
         await api.clearAndroidProxy(device).catch(() => undefined);

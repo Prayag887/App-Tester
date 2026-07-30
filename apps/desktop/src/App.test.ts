@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, baselineKey, bodyText, captureCleanupDevice, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, logEvidence, preferredDevice, redactLogMessage, usbWifiHandoff } from "./App";
+import { App, baselineKey, bodyText, captureCleanupDevice, captureStartupPlan, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, logEvidence, preferredDevice, redactLogMessage, usbWifiHandoff } from "./App";
 import { collectTransactionPages } from "./api";
 import type { AndroidDevice, HttpTransaction, LogIncident } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
@@ -49,6 +49,12 @@ describe("traffic presentation", () => {
     });
     expect(usbWifiHandoff("192.168.1.44:5555", "", true).restartLogcat).toBe(false);
     expect(usbWifiHandoff("192.168.1.44:5555", "", false).cleanupDevice).toBeUndefined();
+  });
+  it("keeps Logcat enabled when the Companion provides per-app traffic capture", () => {
+    expect(captureStartupPlan("oneplus", true)).toEqual({
+      configureSystemProxy: false,
+      startLogcat: true,
+    });
   });
   it("cleans up the device that was configured even if selection changes", () => {
     expect(captureCleanupDevice("192.168.1.44:5555", "emulator-5554")).toBe("192.168.1.44:5555");
