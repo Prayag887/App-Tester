@@ -230,6 +230,48 @@ fn shell_quote(value: &str) -> String {
 }
 
 pub fn generate_curl(request: &CapturedRequest) -> GeneratedCurl {
+    generate_curl_with_headers(request, redact_headers(&request.headers))
+}
+
+/// Produces the locally displayed cURL command with the original Authorization
+/// value, while retaining redaction for every other sensitive header.
+///
+/// The resulting command is intentionally omitted from portable exports.
+pub fn generate_local_curl_with_authorization(
+    request: &CapturedRequest,
+    original_headers: &[HeaderEntry],
+) -> GeneratedCurl {
+    let headers = request
+        .headers
+        .iter()
+        .map(|header| {
+            let value = if matches!(
+                header.name.to_ascii_lowercase().as_str(),
+                "authorization" | "proxy-authorization"
+            ) {
+                original_headers
+                    .iter()
+                    .find(|original| original.name.eq_ignore_ascii_case(&header.name))
+                    .map(|original| original.value.clone())
+                    .unwrap_or_else(|| header.value.clone())
+            } else if is_secret(&header.name) {
+                "<redacted>".into()
+            } else {
+                header.value.clone()
+            };
+            HeaderEntry {
+                name: header.name.clone(),
+                value,
+            }
+        })
+        .collect();
+    generate_curl_with_headers(request, headers)
+}
+
+fn generate_curl_with_headers(
+    request: &CapturedRequest,
+    headers: Vec<HeaderEntry>,
+) -> GeneratedCurl {
     let mut url = format!(
         "{}://{}{}{}",
         request.scheme,
@@ -268,7 +310,7 @@ pub fn generate_curl(request: &CapturedRequest) -> GeneratedCurl {
         "proxy-connection",
         "accept-encoding",
     ];
-    let headers = redact_headers(&request.headers)
+    let headers = headers
         .into_iter()
         .filter(|header| {
             !ignored
@@ -376,5 +418,48 @@ mod tests {
         assert_eq!(shell_quote("it's"), "'it'\"'\"'s'");
         assert_eq!(normalize_path("/users/847"), "/users/{id}");
         assert_eq!(normalize_path("/users/me"), "/users/me");
+    }
+    #[test]
+    fn local_curl_keeps_authorization_but_redacts_other_secrets() {
+        let request = CapturedRequest {
+            method: "GET".into(),
+            scheme: "https".into(),
+            host: "example.com".into(),
+            port: None,
+            path: "/profile".into(),
+            query: vec![],
+            headers: redact_headers(&[
+                HeaderEntry {
+                    name: "Authorization".into(),
+                    value: "Bearer original-token".into(),
+                },
+                HeaderEntry {
+                    name: "X-Api-Key".into(),
+                    value: "private-key".into(),
+                },
+            ]),
+            body: BodyStorage::Empty,
+            content_type: None,
+            http_version: "HTTP/1.1".into(),
+        };
+        let curl = generate_local_curl_with_authorization(
+            &request,
+            &[
+                HeaderEntry {
+                    name: "Authorization".into(),
+                    value: "Bearer original-token".into(),
+                },
+                HeaderEntry {
+                    name: "X-Api-Key".into(),
+                    value: "private-key".into(),
+                },
+            ],
+        );
+        assert!(
+            curl.compact
+                .contains("Authorization: Bearer original-token")
+        );
+        assert!(curl.compact.contains("X-Api-Key: <redacted>"));
+        assert!(!curl.compact.contains("private-key"));
     }
 }

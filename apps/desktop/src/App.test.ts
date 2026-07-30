@@ -51,8 +51,19 @@ describe("traffic presentation", () => {
     expect(usbWifiHandoff("192.168.1.44:5555", "", false).cleanupDevice).toBeUndefined();
   });
   it("keeps Logcat enabled when the Companion provides per-app traffic capture", () => {
-    expect(captureStartupPlan("oneplus", true)).toEqual({
+    expect(captureStartupPlan("oneplus", true, "usb")).toEqual({
+      requiresCompanion: false,
+      clearSystemProxy: true,
       configureSystemProxy: false,
+      startLogcat: true,
+    });
+  });
+  it("requires the Companion on physical devices so unrelated apps cannot be captured", () => {
+    expect(captureStartupPlan("oneplus", false, "usb").requiresCompanion).toBe(true);
+    expect(captureStartupPlan("emulator-5554", false, "emulator")).toEqual({
+      requiresCompanion: false,
+      clearSystemProxy: false,
+      configureSystemProxy: true,
       startLogcat: true,
     });
   });

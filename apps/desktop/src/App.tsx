@@ -73,8 +73,14 @@ export const usbWifiHandoff = (endpoint: string, packageName: string, captureAct
 });
 export const captureCleanupDevice = (configuredDevice: string | undefined, selectedDevice: string) =>
   configuredDevice || selectedDevice;
-export const captureStartupPlan = (device: string, companionActive: boolean) => ({
-  configureSystemProxy: Boolean(device) && !companionActive,
+export const captureStartupPlan = (
+  device: string,
+  companionActive: boolean,
+  connectionType?: AndroidDevice["connection_type"],
+) => ({
+  requiresCompanion: Boolean(device) && !companionActive && connectionType !== "emulator",
+  clearSystemProxy: Boolean(device) && companionActive,
+  configureSystemProxy: Boolean(device) && !companionActive && connectionType === "emulator",
   startLogcat: Boolean(device),
 });
 export const incidentLocation = (incident: LogIncident, packageName: string) =>
@@ -277,14 +283,24 @@ export function App() {
       setTransactions([]);
       setSelectedId(undefined);
       setIncidents([]);
+      const selectedDevice = devices.find(item => item.serial === device);
       const companionActive = Boolean(companionConnection && companionConnected);
-      const capturePlan = captureStartupPlan(device, companionActive);
+      const capturePlan = captureStartupPlan(device, companionActive, selectedDevice?.connection_type);
+      if (capturePlan.requiresCompanion) {
+        setNotice("Connect App Tester Companion to capture one Android app. The Android system proxy can include traffic from other apps, so it is not used for physical-device capture.");
+        return;
+      }
       activeSessionId.current = await api.startProxy();
-      const proxyConfiguration = await api.getProxyConfiguration();
       if (companionActive && companionConnection) {
+        // A proxy from an earlier direct capture is device-wide. Remove it before
+        // enabling the Companion VPN so only the selected package can reach us.
+        if (capturePlan.clearSystemProxy) {
+          await api.clearAndroidProxy(device);
+          configuredCaptureDevice.current = undefined;
+        }
         await api.selectCompanionPackage(companionConnection.token, capturePackage);
       } else if (capturePlan.configureSystemProxy) {
-        const selectedDevice = devices.find(item => item.serial === device);
+        const proxyConfiguration = await api.getProxyConfiguration();
         const host = await api.getProxyHost(selectedDevice?.connection_type ?? "usb");
         setDesktopHost(host);
         await api.configureAndroidProxy(device, host, proxyConfiguration.port);
