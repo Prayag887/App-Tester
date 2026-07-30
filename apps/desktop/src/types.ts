@@ -1,5 +1,6 @@
 export type ProxyStatus = "stopped" | "starting" | "running" | "certificate_required" |
   "device_not_configured" | "partially_available" | "blocked_by_pinning" | "failed";
+export interface ProxyConfiguration { bind_address:string; port:number; ca_certificate_path:string; ca_fingerprint_sha256?:string }
 export interface HeaderEntry { name: string; value: string }
 export interface QueryParameter { name: string; value: string }
 export type BodyStorage =
@@ -64,3 +65,4 @@ export interface LogIncident {
   first_occurred_at:string; occurred_at: string; lines: { timestamp_ms:number; level:string; tag:string; message:string }[];
 }
 export interface ReplaySummary { attempted:number; completed:number; changed:number; skipped:number; failed:number }
+export interface ComparisonRules { ignored_json_pointers:string[]; volatile_keys:string[] }

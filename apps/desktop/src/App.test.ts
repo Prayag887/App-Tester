@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, bodyText, captureCleanupDevice, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, preferredDevice, usbWifiHandoff } from "./App";
+import { App, baselineKey, bodyText, captureCleanupDevice, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, preferredDevice, usbWifiHandoff } from "./App";
 import { collectTransactionPages } from "./api";
 import type { AndroidDevice, HttpTransaction, LogIncident } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
@@ -30,6 +30,10 @@ describe("traffic presentation", () => {
   it("shortens excluded endpoints without losing their identifying path", () => {
     expect(compactEndpoint("https://www.api.example.com/v1/users")).toBe("api.example/v1/users");
     expect(compactEndpoint("http://service.dev:8080/health")).toBe("service:8080/health");
+  });
+  it("uses the normalized endpoint identity for a persistent baseline", () => {
+    const tx = {...transaction, endpoint_identity:{method:"GET",host:"api.example.com",path_template:"/users/{id}"}} as HttpTransaction;
+    expect(baselineKey(tx)).toBe("GET api.example.com /users/{id}");
   });
   it("prefers a USB device while preserving a valid explicit selection", () => {
     const usb = {serial:"oneplus",connection_type:"usb",authorization_status:"authorized"} as AndroidDevice;
@@ -61,10 +65,13 @@ describe("traffic presentation", () => {
     expect(markup).toContain("Delete all");
     expect(markup).toContain("Export redacted");
     expect(markup).toContain("Import capture");
-    expect(markup).toContain("without deleting saved comparison history");
+    expect(markup).toContain("Permanently delete all saved capture data from this computer");
     expect(markup).toContain("Inspect logs");
     expect(markup).toContain("Toolkit");
     expect(markup).toContain("Desktop host:");
+    expect(markup).toContain('aria-label="Settings"');
+    expect(markup).toContain('aria-label="Search captured traffic"');
+    expect(markup).toContain('aria-label="Download Android companion"');
     expect(markup).not.toContain("Connect via QR");
     expect(markup).not.toContain("Pair with code");
     expect(markup).not.toContain("USB to Wi-Fi");
