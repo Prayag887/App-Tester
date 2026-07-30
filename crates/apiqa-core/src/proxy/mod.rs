@@ -296,6 +296,7 @@ impl HttpHandler for CaptureHandler {
             .get("content-type")
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
+        let original_headers = headers(&parts.headers);
         let captured_request = CapturedRequest {
             method: parts.method.to_string(),
             scheme: uri.scheme_str().unwrap_or("http").into(),
@@ -314,7 +315,7 @@ impl HttpHandler for CaptureHandler {
             path: uri.path().to_owned(),
             query,
             content_type: content_type.clone(),
-            headers: redact_headers(&headers(&parts.headers)),
+            headers: redact_headers(&original_headers),
             body: BodyStorage::Empty,
             http_version: version(parts.version),
         };
@@ -357,7 +358,10 @@ impl HttpHandler for CaptureHandler {
                 content_type: transaction.request.content_type.clone(),
                 request_shape: request_shape(&transaction.request.body),
             });
-            transaction.curl = Some(generate_curl(&transaction.request));
+            transaction.curl = Some(generate_local_curl_with_authorization(
+                &transaction.request,
+                &original_headers,
+            ));
             transaction.state = TransactionState::RequestComplete;
             transaction.timing.request_complete_ms =
                 Some(now.unix_timestamp_nanos() as i64 / 1_000_000);
