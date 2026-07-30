@@ -1,7 +1,7 @@
 name: app_tester_companion
 description: Android desktop-link companion for App Tester.
 publish_to: none
-version: 0.2.2+4
+version: 0.2.3+5
 
 environment:
   sdk: ^3.5.0
