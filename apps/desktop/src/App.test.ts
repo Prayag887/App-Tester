@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, baselineKey, bodyText, captureCleanupDevice, captureStartupPlan, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, logEvidence, preferredDevice, redactLogMessage, usbWifiHandoff } from "./App";
+import { App, bodyText, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, incidentTotals, isInterceptionTlsNoise, matchingApps, preferredDevice } from "./App";
 import { collectTransactionPages } from "./api";
 import type { AndroidDevice, HttpTransaction, LogIncident } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
@@ -31,45 +31,20 @@ describe("traffic presentation", () => {
     expect(compactEndpoint("https://www.api.example.com/v1/users")).toBe("api.example/v1/users");
     expect(compactEndpoint("http://service.dev:8080/health")).toBe("service:8080/health");
   });
-  it("uses the normalized endpoint identity for a persistent baseline", () => {
-    const tx = {...transaction, endpoint_identity:{method:"GET",host:"api.example.com",path_template:"/users/{id}"}} as HttpTransaction;
-    expect(baselineKey(tx)).toBe("GET api.example.com /users/{id}");
-  });
-  it("prefers a USB device while preserving a valid explicit selection", () => {
+  it("selects only authorized USB devices", () => {
     const usb = {serial:"oneplus",connection_type:"usb",authorization_status:"authorized"} as AndroidDevice;
     const emulator = {serial:"emulator",connection_type:"emulator",authorization_status:"authorized"} as AndroidDevice;
     expect(preferredDevice("", [emulator, usb])).toBe("oneplus");
-    expect(preferredDevice("emulator", [emulator, usb])).toBe("emulator");
+    expect(preferredDevice("emulator", [emulator, usb])).toBe("oneplus");
     expect(preferredDevice("disconnected", [emulator, usb])).toBe("oneplus");
   });
-  it("keeps an active capture connected when USB hands off to Wi-Fi", () => {
-    expect(usbWifiHandoff("192.168.1.44:5555", "com.example.app", true)).toEqual({
-      endpoint: "192.168.1.44:5555", refreshProxyOwnership: true, restartLogcat: true,
-      cleanupDevice: "192.168.1.44:5555",
-    });
-    expect(usbWifiHandoff("192.168.1.44:5555", "", true).restartLogcat).toBe(false);
-    expect(usbWifiHandoff("192.168.1.44:5555", "", false).cleanupDevice).toBeUndefined();
-  });
-  it("keeps Logcat enabled when the Companion provides per-app traffic capture", () => {
-    expect(captureStartupPlan("oneplus", true, "usb")).toEqual({
-      requiresCompanion: false,
-      clearSystemProxy: true,
-      configureSystemProxy: false,
-      startLogcat: true,
-    });
-  });
-  it("requires the Companion on physical devices so unrelated apps cannot be captured", () => {
-    expect(captureStartupPlan("oneplus", false, "usb").requiresCompanion).toBe(true);
-    expect(captureStartupPlan("emulator-5554", false, "emulator")).toEqual({
-      requiresCompanion: false,
-      clearSystemProxy: false,
-      configureSystemProxy: true,
-      startLogcat: true,
-    });
-  });
-  it("cleans up the device that was configured even if selection changes", () => {
-    expect(captureCleanupDevice("192.168.1.44:5555", "emulator-5554")).toBe("192.168.1.44:5555");
-    expect(captureCleanupDevice(undefined, "emulator-5554")).toBe("emulator-5554");
+  it("searches debuggable packages by package name or version", () => {
+    const apps = [
+      {package_name:"com.yajtech.eynorixdev",version_name:"1.0.10",debuggable:true},
+      {package_name:"com.example.other",version_name:"2.4",debuggable:true},
+    ];
+    expect(matchingApps(apps, "EYNORIX").map(app => app.package_name)).toEqual(["com.yajtech.eynorixdev"]);
+    expect(matchingApps(apps, "2.4").map(app => app.package_name)).toEqual(["com.example.other"]);
   });
   it("loads every transaction page instead of truncating the display at 250 hits", async () => {
     const hits = Array.from({length:620}, (_, index) => ({...transaction,id:`tx-${index}`} as HttpTransaction));
@@ -80,20 +55,17 @@ describe("traffic presentation", () => {
   it("renders a Delete all control for clearing captured APIs", () => {
     const markup = renderToStaticMarkup(createElement(App));
     expect(markup).toContain("Delete all");
-    expect(markup).toContain("Export redacted");
-    expect(markup).toContain("Import capture");
-    expect(markup).toContain("Permanently delete all saved capture data from this computer");
+    expect(markup).toContain("without deleting saved comparison history");
     expect(markup).toContain("Inspect logs");
     expect(markup).toContain("Toolkit");
     expect(markup).toContain("Desktop host:");
-    expect(markup).toContain('aria-label="Settings"');
-    expect(markup).toContain('aria-label="Search captured traffic"');
-    expect(markup).toContain('aria-label="Download Android companion"');
     expect(markup).not.toContain("Connect via QR");
     expect(markup).not.toContain("Pair with code");
     expect(markup).not.toContain("USB to Wi-Fi");
-    expect(markup).toContain('<select aria-label="Package"');
-    expect(markup).not.toContain('<select aria-label="Package" disabled');
+    expect(markup).not.toContain("Download app");
+    expect(markup).not.toContain("Connect companion");
+    expect(markup).toContain("Install companion");
+    expect(markup).toContain('aria-label="Search debuggable packages"');
   });
   it("shows an application frame as the incident location with a Logcat fallback", () => {
     const incident = {first_app_frame:"at com.example.Home.load(Home.kt:42)",foreground_activity:"com.example/.HomeActivity",lines:[
@@ -102,11 +74,6 @@ describe("traffic presentation", () => {
     expect(incidentLocation(incident, "com.example")).toBe("com.example/.HomeActivity");
     expect(incidentLocation({...incident,first_app_frame:undefined,foreground_activity:undefined}, "com.example")).toBe("Home · Logcat");
   });
-  it("creates one copyable evidence block with sensitive values redacted", () => {
-    const lines = [{timestamp_ms:1,level:"D",tag:"Event",message:"firebaseAuthenticationToken=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature"}];
-    expect(redactLogMessage(lines[0].message)).not.toContain("eyJhbGci");
-    expect(logEvidence(lines)).toBe("D Event: firebaseAuthenticationToken=[REDACTED]");
-  });
 });
 describe("developer incident report", () => {
   it("includes diagnosis, reproduction, and evidence", () => {
@@ -114,5 +81,15 @@ describe("developer incident report", () => {
     expect(report).toContain("Where: at com.example.Checkout.submit");
     expect(report).toContain("2. Tap Pay");
     expect(report).toContain("E AndroidRuntime: FATAL EXCEPTION");
+  });
+  it("counts repeated incidents instead of only unique signatures", () => {
+    const repeated = {...incident,category:"network",occurrence_count:3} as LogIncident;
+    const warning = {...incident,category:"warning",occurrence_count:2} as LogIncident;
+    expect(incidentTotals([repeated, warning])).toEqual({total:5,errors:3,warnings:2});
+  });
+  it("hides trust failures caused by interception", () => {
+    const tls = {...incident, title:"TLS certificate not trusted", root_cause:"CertPathValidatorException: Trust anchor for certification path not found."} as LogIncident;
+    expect(isInterceptionTlsNoise(tls)).toBe(true);
+    expect(isInterceptionTlsNoise(incident)).toBe(false);
   });
 });

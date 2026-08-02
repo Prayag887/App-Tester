@@ -1,14 +1,14 @@
 {
   "name": "app-tester-workspace",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.2.0",
   "license": "GPL-3.0-only",
   "packageManager": "pnpm@11.5.2",
   "scripts": {
     "dev": "pnpm --dir apps/desktop tauri dev",
     "companion:check": "cd apps/companion && flutter analyze && flutter test",
-    "companion:build": "cd apps/companion && flutter build apk --release && node ../../scripts/sync-companion-release.mjs",
-    "companion:build:qa": "cd apps/companion && flutter build apk --debug && node ../../scripts/sync-companion-release.mjs app-debug.apk",
+    "companion:build": "cd apps/companion && flutter build apk --release",
+    "companion:build:qa": "cd apps/companion && flutter build apk --debug",
     "desktop:build": "pnpm --dir apps/desktop tauri build",
     "build": "pnpm run companion:build && pnpm run desktop:build",
     "check": "pnpm run qa:production",

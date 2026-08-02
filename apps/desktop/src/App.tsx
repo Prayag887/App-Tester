@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Activity, AlertCircle, CalendarDays, Circle, Copy, Download, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Upload, Wifi, X } from "lucide-react";
+import { Activity, AlertCircle, CalendarDays, ChevronDown, Circle, Copy, Download, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Upload, X } from "lucide-react";
 import * as api from "./api";
-import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, ComparisonRules, CompanionConnection, CompanionInstall, HttpTransaction, LogIncident, ProxyStatus } from "./types";
+import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, CompanionStatus, HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
 type InspectorTab = "Overview" | "Request" | "Response" | "Compare" | "cURL" | "Logs" | "Timeline";
 type Screen = "toolkit" | "logs";
@@ -23,9 +23,6 @@ export const displayState = (tx: HttpTransaction) => {
 };
 export const fullEndpoint = (tx: HttpTransaction) =>
   `${tx.request.scheme}://${tx.request.host}${tx.request.path}`;
-export const baselineKey = (tx: HttpTransaction) => tx.endpoint_identity
-  ? `${tx.endpoint_identity.method} ${tx.endpoint_identity.host} ${tx.endpoint_identity.path_template}`
-  : undefined;
 export const compactEndpoint = (endpoint: string) => {
   const withoutProtocol = endpoint.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
   const slash = withoutProtocol.indexOf("/");
@@ -58,33 +55,31 @@ export const endpointSuggestions = (transactions: HttpTransaction[], input: stri
     .filter(endpoint => endpoint.toLowerCase().includes(query))
     .slice(0, limit);
 };
+export const matchingApps = (apps: AndroidApp[], query: string) => {
+  const needle = query.trim().toLowerCase();
+  return needle
+    ? apps.filter(app => `${app.package_name} ${app.version_name ?? ""}`.toLowerCase().includes(needle))
+    : apps;
+};
 export const preferredDevice = (current: string, devices: AndroidDevice[]) => {
-  if (devices.some(device => device.serial === current && device.authorization_status === "authorized")) {
+  const usb = devices.filter(device => device.connection_type === "usb");
+  if (usb.some(device => device.serial === current && device.authorization_status === "authorized")) {
     return current;
   }
-  return devices.find(device => device.connection_type === "usb" && device.authorization_status === "authorized")?.serial ??
-    devices.find(device => device.authorization_status === "authorized")?.serial ?? "";
+  return usb.find(device => device.authorization_status === "authorized")?.serial ?? "";
 };
-export const usbWifiHandoff = (endpoint: string, packageName: string, captureActive: boolean) => ({
-  endpoint,
-  refreshProxyOwnership: captureActive,
-  restartLogcat: captureActive && Boolean(packageName),
-  cleanupDevice: captureActive ? endpoint : undefined,
-});
-export const captureCleanupDevice = (configuredDevice: string | undefined, selectedDevice: string) =>
-  configuredDevice || selectedDevice;
-export const captureStartupPlan = (
-  device: string,
-  companionActive: boolean,
-  connectionType?: AndroidDevice["connection_type"],
-) => ({
-  requiresCompanion: Boolean(device) && !companionActive && connectionType !== "emulator",
-  clearSystemProxy: Boolean(device) && companionActive,
-  configureSystemProxy: Boolean(device) && !companionActive && connectionType === "emulator",
-  startLogcat: Boolean(device),
-});
 export const incidentLocation = (incident: LogIncident, packageName: string) =>
   incident.where_occurred ?? incident.foreground_activity ?? incident.first_app_frame ?? `${incident.lines[0]?.tag ?? packageName} · Logcat`;
+export const incidentTotals = (incidents: LogIncident[]) => {
+  const total = incidents.reduce((sum, item) => sum + item.occurrence_count, 0);
+  const errors = incidents.filter(item => ["crash","error","anr","dto_parsing","database","memory","network"].includes(item.category))
+    .reduce((sum, item) => sum + item.occurrence_count, 0);
+  return {total, errors, warnings: total - errors};
+};
+export const isInterceptionTlsNoise = (incident: LogIncident) => {
+  const evidence = `${incident.title}\n${incident.summary}\n${incident.root_cause ?? ""}\n${incident.lines.map(line => line.message).join("\n")}`.toLowerCase();
+  return evidence.includes("trust anchor for certification path not found") || evidence.includes("certpathvalidatorexception");
+};
 export const redactLogMessage = (message:string) => message
   .replace(/\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}\b/g, "[REDACTED_JWT]")
   .replace(/("?(?:authorization|access[_-]?token|refresh[_-]?token|firebase(?:authentication|installation)?id|sessionid|session_id|token|mobile_no|username)"?\s*[:=]\s*"?)([^",\s}]+)/gi, "$1[REDACTED]");
@@ -137,30 +132,40 @@ export function App() {
   const [apps, setApps] = useState<AndroidApp[]>([]);
   const [appsLoading, setAppsLoading] = useState(false);
   const [packageName, setPackageName] = useState("");
+  const [packageSearch, setPackageSearch] = useState("");
+  const [packagePickerOpen, setPackagePickerOpen] = useState(false);
   const [desktopHost, setDesktopHost] = useState("Resolving…");
   const [notice, setNotice] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const [enablingUsbWifi, setEnablingUsbWifi] = useState(false);
   const [certificateInstall, setCertificateInstall] = useState<AndroidCertificateInstall>();
-  const [companionInstall, setCompanionInstall] = useState<CompanionInstall>();
-  const [companionConnection, setCompanionConnection] = useState<CompanionConnection>();
-  const [preparingCompanionConnection, setPreparingCompanionConnection] = useState(false);
-  const [companionConnected, setCompanionConnected] = useState(false);
+  const [companionStatus, setCompanionStatus] = useState<CompanionStatus>();
+  const [checkingCompanion, setCheckingCompanion] = useState(false);
   const [installingCompanion, setInstallingCompanion] = useState(false);
   const [caStatus, setCaStatus] = useState<AndroidCaStatus>();
   const [caChanging, setCaChanging] = useState(false);
   const [incidents, setIncidents] = useState<LogIncident[]>([]);
   const hiddenTransactionIds = useRef(new Set<string>());
   const activeSessionId = useRef<string | undefined>(undefined);
-  const configuredCaptureDevice = useRef<string | undefined>(undefined);
+  const activeCaptureDevice = useRef<string | undefined>(undefined);
   const importInput = useRef<HTMLInputElement>(null);
+  const appRequest = useRef(0);
+  const companionRequest = useRef(0);
 
   useEffect(() => {
     void api.getProxyStatus().then(setProxy);
     const refreshDevices = () => {
       void api.discoverDevices().then(items => {
-        setDevices(items);
-        setDevice(current => preferredDevice(current, items));
+        const usbDevices = items.filter(item => item.connection_type === "usb");
+        setDevices(usbDevices);
+        setDevice(current => preferredDevice(current, usbDevices));
+        const captureSerial = activeCaptureDevice.current;
+        if (captureSerial && !usbDevices.some(item => item.serial === captureSerial && item.authorization_status === "authorized")) {
+          activeCaptureDevice.current = undefined;
+          setCapturing(false);
+          setPaused(false);
+          void api.stopProxy();
+          setNotice("USB disconnected. Capture stopped and phone traffic returned to direct networking.");
+        }
       }).catch(error => setNotice(`Could not refresh Android devices: ${String(error)}`));
     };
     refreshDevices();
@@ -197,15 +202,34 @@ export function App() {
     };
   }, []);
   useEffect(() => {
+    const request = ++appRequest.current;
+    setApps([]);
+    setPackageName("");
+    setPackageSearch("");
     if (!device) return;
     setAppsLoading(true);
     void api.listInstalledApps(device).then(items => {
+      if (request !== appRequest.current) return;
       const devApps = items.filter(item => item.debuggable);
       setApps(devApps);
-      setPackageName(current => devApps.some(item => item.package_name === current)
-        ? current : devApps[0]?.package_name ?? "");
+      setNotice(devApps.length
+        ? `Found ${devApps.length} debuggable package${devApps.length === 1 ? "" : "s"}. Search and select one to open it.`
+        : "No debuggable packages found. Release builds are hidden.");
     }).catch(error => setNotice(`Could not load debuggable packages: ${String(error)}`))
-      .finally(() => setAppsLoading(false));
+      .finally(() => { if (request === appRequest.current) setAppsLoading(false); });
+  }, [device]);
+  useEffect(() => {
+    const request = ++companionRequest.current;
+    setCompanionStatus(undefined);
+    if (!device) { setCheckingCompanion(false); return; }
+    setCheckingCompanion(true);
+    void api.getCompanionStatus(device).then(status => {
+      if (request !== companionRequest.current) return;
+      setCompanionStatus(status);
+      if (!status.installed) setNotice("App Tester Companion is not installed on this phone. Choose Install companion to add it over USB.");
+    }).catch(error => {
+      if (request === companionRequest.current) setNotice(`Could not inspect companion: ${String(error)}`);
+    }).finally(() => { if (request === companionRequest.current) setCheckingCompanion(false); });
   }, [device]);
   useEffect(() => {
     if (!device) { setCaStatus(undefined); return; }
@@ -217,26 +241,7 @@ export function App() {
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
   }, [device, devices]);
-  useEffect(() => {
-    if (!companionConnection) return;
-    const refresh = () => void api.listCompanionApps(companionConnection.token).then(items => {
-      if (!items.length) return;
-      const remoteApps = items.map(item => ({package_name: item.package_name, version_name: item.label, debuggable: true}));
-      setCompanionConnected(true);
-      setApps(remoteApps);
-      setPackageName(current => remoteApps.some(item => item.package_name === current) ? current : "");
-      setNotice("Companion connected. Select an app, then start capture.");
-    });
-    refresh();
-    const timer = window.setInterval(refresh, 1000);
-    return () => window.clearInterval(timer);
-  }, [companionConnection]);
-  useEffect(() => {
-    const connectionType = devices.find(item => item.serial === device)?.connection_type ?? "usb";
-    void api.getProxyHost(connectionType)
-      .then(setDesktopHost)
-      .catch(() => setDesktopHost("Unavailable"));
-  }, [device, devices]);
+  useEffect(() => setDesktopHost(device ? "USB relay" : "Unavailable"), [device]);
   useEffect(() => {
     if (!capturing || paused) return;
     const refresh = () => {
@@ -272,8 +277,6 @@ export function App() {
 
   async function start(packageOverride?: string) {
     const capturePackage = packageOverride ?? packageName;
-    let deviceProxyConfigured = false;
-    let logcatWarning = "";
     try {
       if (!capturePackage) {
         setNotice("Select a debuggable package before starting capture.");
@@ -283,42 +286,14 @@ export function App() {
       setTransactions([]);
       setSelectedId(undefined);
       setIncidents([]);
-      const selectedDevice = devices.find(item => item.serial === device);
-      const companionActive = Boolean(companionConnection && companionConnected);
-      const capturePlan = captureStartupPlan(device, companionActive, selectedDevice?.connection_type);
-      if (capturePlan.requiresCompanion) {
-        setNotice("Connect App Tester Companion to capture one Android app. The Android system proxy can include traffic from other apps, so it is not used for physical-device capture.");
-        return;
-      }
       activeSessionId.current = await api.startProxy();
-      if (companionActive && companionConnection) {
-        // A proxy from an earlier direct capture is device-wide. Remove it before
-        // enabling the Companion VPN so only the selected package can reach us.
-        if (capturePlan.clearSystemProxy) {
-          await api.clearAndroidProxy(device);
-          configuredCaptureDevice.current = undefined;
-        }
-        await api.selectCompanionPackage(companionConnection.token, capturePackage);
-      } else if (capturePlan.configureSystemProxy) {
-        const proxyConfiguration = await api.getProxyConfiguration();
-        const host = await api.getProxyHost(selectedDevice?.connection_type ?? "usb");
-        setDesktopHost(host);
-        await api.configureAndroidProxy(device, host, proxyConfiguration.port);
-        deviceProxyConfigured = true;
-        configuredCaptureDevice.current = device;
-      }
-      if (capturePlan.startLogcat) {
-        await api.startLogcatCapture(device, capturePackage).catch(error => {
-          logcatWarning = ` Capture is active, but Log Inspector could not start: ${String(error)}`;
-        });
-      }
-      setCapturing(true);
-      setNotice(`Capture active for ${capturePackage}. Navigate that Android app manually.${logcatWarning}`);
+      if (!device) throw new Error("Connect an authorized phone over USB before starting capture.");
+      await api.openCompanion(device, capturePackage);
+      await api.startLogcatCapture(device, capturePackage);
+      activeCaptureDevice.current = device;
+      setCapturing(true); setNotice("Capture active. Navigate the Android app manually.");
     } catch (error) {
-      if (deviceProxyConfigured && device) {
-        await api.clearAndroidProxy(device).catch(() => undefined);
-        configuredCaptureDevice.current = undefined;
-      }
+      activeCaptureDevice.current = undefined;
       await api.stopProxy().catch(() => undefined);
       if (String(error).includes("CA certificate")) await setupHttpsCapture();
       else setNotice(String(error));
@@ -326,116 +301,58 @@ export function App() {
   }
   async function stop() {
     const failures:string[] = [];
-    const cleanupDevice = captureCleanupDevice(configuredCaptureDevice.current, device);
-    if (cleanupDevice) await api.clearAndroidProxy(cleanupDevice).catch(error => failures.push(String(error)));
-    if (!failures.length) configuredCaptureDevice.current = undefined;
+    const captureSerial = activeCaptureDevice.current;
+    activeCaptureDevice.current = undefined;
+    if (captureSerial) await api.removeUsbRelay(captureSerial).catch(error => failures.push(String(error)));
     await api.stopProxy().catch(error => failures.push(String(error)));
     try {
       setCapturing(false); setPaused(false);
       setNotice(failures.length
         ? `Capture stopped, but cleanup needs attention: ${failures.join(" · ")}`
-        : "Capture stopped and the Android system proxy was cleared.");
+        : "Capture stopped. Phone traffic is using direct networking.");
     } finally {
       setCapturing(false); setPaused(false);
-    }
-  }
-  async function switchUsbToWifi() {
-    const selectedDevice = devices.find(item => item.serial === device);
-    if (!selectedDevice || selectedDevice.connection_type !== "usb") return;
-    setEnablingUsbWifi(true);
-    try {
-      const result = await api.enableUsbWifi(selectedDevice.serial);
-      const handoff = usbWifiHandoff(
-        result.endpoint,
-        packageName,
-        capturing && !companionConnected,
-      );
-      // `adb tcpip` closes the USB transport. Update selection first so Stop and
-      // app-exit cleanup always target the reachable Wi-Fi endpoint.
-      setDevice(handoff.endpoint);
-      if (handoff.refreshProxyOwnership) {
-        // Once the ADB transport has moved, the USB serial is no longer a safe
-        // cleanup target. Transfer ownership before any operation that can fail.
-        configuredCaptureDevice.current = handoff.cleanupDevice;
-        try {
-          const host = await api.getProxyHost("wireless");
-          setDesktopHost(host);
-          const proxyConfiguration = await api.getProxyConfiguration();
-          await api.configureAndroidProxy(handoff.endpoint, host, proxyConfiguration.port);
-        } catch (handoffError) {
-          const failures: string[] = [];
-          await api.clearAndroidProxy(handoff.endpoint).catch(error => failures.push(String(error)));
-          if (!failures.length) configuredCaptureDevice.current = undefined;
-          await api.stopProxy().catch(error => failures.push(String(error)));
-          setCapturing(false); setPaused(false);
-          throw new Error(failures.length
-            ? `Wi-Fi handoff failed and cleanup needs attention: ${failures.join(" · ")}`
-            : `Wi-Fi handoff failed; capture stopped and the Android proxy was cleared: ${String(handoffError)}`);
-        }
-      }
-      if (handoff.restartLogcat) {
-        await api.startLogcatCapture(handoff.endpoint, packageName).catch(error =>
-          setNotice(`Capture continues over Wi-Fi, but Logcat could not restart: ${String(error)}`));
-      }
-      setNotice(capturing
-        ? `Capture continues over Wi-Fi at ${handoff.endpoint}. You can now unplug USB.`
-        : `Wi-Fi debugging is ready at ${handoff.endpoint}. Keep the phone and Mac on the same Wi-Fi, then you can unplug USB.`);
-    } catch (error) {
-      setNotice(`Could not switch ${selectedDevice.serial} to Wi-Fi: ${String(error)}`);
-    } finally {
-      setEnablingUsbWifi(false);
-    }
-  }
-  async function openCompanionInstall() {
-    try {
-      setCompanionInstall(await api.prepareCompanionInstall());
-    } catch (error) {
-      setNotice(`Could not prepare the companion installer: ${String(error)}`);
-    }
-  }
-  async function openCompanionConnection() {
-    setPreparingCompanionConnection(true);
-    setNotice("");
-    try {
-      const connectionType = devices.find(item => item.serial === device)?.connection_type ?? "usb";
-      const host = await api.getProxyHost(connectionType);
-      setDesktopHost(host);
-      if (proxy !== "running") {
-        activeSessionId.current = await api.startProxy();
-        setProxy("running");
-      }
-      setCompanionConnection(await api.prepareCompanionConnection(host));
-      setCompanionConnected(false);
-    } catch (error) {
-      setNotice(`Could not prepare companion connection: ${String(error)}`);
-    } finally {
-      setPreparingCompanionConnection(false);
     }
   }
   async function installCompanionDirectly() {
     if (!device) return;
     setInstallingCompanion(true);
     try {
-      await api.installCompanion(device);
-      setCompanionInstall(undefined);
+      setCompanionStatus(await api.installCompanion(device));
+      setNotice("Companion installed over USB. Open it once to approve VPN access.");
     } catch (error) {
       setNotice(`Could not install the companion: ${String(error)}`);
     } finally {
       setInstallingCompanion(false);
     }
   }
+  async function openCompanion() {
+    if (!device) return;
+    try {
+      await api.openCompanion(device);
+      setNotice("Companion opened on the connected phone.");
+    } catch (error) {
+      setNotice(`Could not open the companion: ${String(error)}`);
+    }
+  }
   async function selectPackage(nextPackage: string) {
     if (nextPackage === packageName) return;
+    const wasCapturing = capturing;
     setConnecting(true);
     try {
-      if (capturing) {
+      if (wasCapturing) {
         await stop();
       }
       setPackageName(nextPackage);
-      if (capturing && nextPackage) {
+      setPackageSearch(nextPackage);
+      setPackagePickerOpen(false);
+      if (device && nextPackage) await api.launchInstalledApp(device, nextPackage);
+      if (wasCapturing && nextPackage) {
         await start(nextPackage);
-        setNotice(`Capture switched to ${nextPackage}.`);
       }
+      setNotice(`${nextPackage} opened on the phone${wasCapturing ? " and capture restarted" : ""}.`);
+    } catch (error) {
+      setNotice(`Could not open ${nextPackage}: ${String(error)}`);
     } finally {
       setConnecting(false);
     }
@@ -471,66 +388,30 @@ export function App() {
       setCaChanging(false);
     }
   }
-  async function deleteAll() {
-    if (!window.confirm("Permanently delete every saved capture, comparison baseline, and diagnostic record from this computer? This cannot be undone.")) return;
-    setConnecting(true);
-    try {
-      await api.deleteAllTransactions();
-      hiddenTransactionIds.current.clear();
-      setTransactions([]); setSelectedId(undefined); setIncidents([]);
-      activeSessionId.current = undefined;
-      setNotice("Permanently deleted all saved capture data from this computer.");
-    } catch (error) {
-      setNotice(`Could not delete saved capture data: ${String(error)}`);
-    } finally {
-      setConnecting(false);
-    }
+  function deleteAll() {
+    transactions.forEach(transaction => hiddenTransactionIds.current.add(transaction.id));
+    setTransactions([]); setSelectedId(undefined); setIncidents([]);
+    setNotice("Cleared the API list from this UI session. Saved history remains available for comparisons and returns after restart.");
   }
   async function exportCurrentCapture() {
     try {
       const path = await api.exportCaptureToFile();
-      setNotice(`Exported redacted capture metadata to ${path}. Bodies and cURL are intentionally omitted.`);
+      setNotice(`Exported redacted capture metadata to ${path}. Bodies and cURL are omitted.`);
     } catch (error) {
-      if (String(error).includes("export canceled")) return;
-      setNotice(`Could not export capture: ${String(error)}`);
+      if (!String(error).includes("export canceled")) setNotice(`Could not export capture: ${String(error)}`);
     }
   }
   async function importPortableCapture(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (file.size > 25 * 1024 * 1024) {
-      setNotice("Capture import must be 25 MiB or smaller.");
-      return;
-    }
+    if (file.size > 25 * 1024 * 1024) { setNotice("Capture import must be 25 MiB or smaller."); return; }
     try {
       const count = await api.importCapture(await file.text());
-      activeSessionId.current = undefined;
       setTransactions(await api.listTransactions());
-      setSelectedId(undefined);
-      setIncidents([]);
-      setNotice(`Imported ${count} redacted transaction${count === 1 ? "" : "s"} into a new local capture.`);
+      setSelectedId(undefined); setIncidents([]);
+      setNotice(`Imported ${count} redacted transaction${count === 1 ? "" : "s"}.`);
     } catch (error) { setNotice(`Could not import capture: ${String(error)}`); }
-  }
-  async function pinBaseline(tx: HttpTransaction) {
-    const endpointId = baselineKey(tx);
-    if (!endpointId || !tx.response) { setNotice("Only completed requests with a recognized endpoint can become baselines."); return; }
-    setConnecting(true);
-    try {
-      await api.approveBaseline(endpointId, tx.id);
-      setNotice("Pinned this response as the baseline for future compatible captures.");
-    } catch (error) { setNotice(`Could not pin baseline: ${String(error)}`); }
-    finally { setConnecting(false); }
-  }
-  async function removeBaseline(tx: HttpTransaction) {
-    const endpointId = baselineKey(tx);
-    if (!endpointId) return;
-    setConnecting(true);
-    try {
-      const removed = await api.deleteBaseline(endpointId);
-      setNotice(removed ? "Removed the pinned baseline for this endpoint." : "No pinned baseline exists for this endpoint.");
-    } catch (error) { setNotice(`Could not remove baseline: ${String(error)}`); }
-    finally { setConnecting(false); }
   }
   async function testYesterday() {
     if (!window.confirm("Replay every testable API captured yesterday? Requests may include state-changing methods. Requests containing redacted credentials or data are skipped.")) return;
@@ -549,6 +430,7 @@ export function App() {
       ? current : [...current, value]);
     setExcludeInput("");
   }
+  const filteredApps = matchingApps(apps, packageSearch);
 
   return <main className="app-shell">
     <aside className="app-sidebar">
@@ -572,18 +454,9 @@ export function App() {
       <select aria-label="Device" value={device} onChange={e=>setDevice(e.target.value)}>
         <option value="">Select device</option>{devices.map(item=><option key={item.serial}>{item.serial}</option>)}
       </select>
-      {devices.find(item => item.serial === device)?.connection_type === "usb" && <button
-        className="wireless-device"
-        disabled={enablingUsbWifi}
-        title="Keep capture and debugging available after unplugging USB"
-        onClick={()=>void switchUsbToWifi()}>
-        <Wifi/>{enablingUsbWifi ? "Enabling Wi-Fi…" : "USB to Wi-Fi"}
-      </button>}
-      <button aria-label="Download Android companion" title="Download the Android companion" onClick={()=>void openCompanionInstall()}>
-        <ShieldCheck/>Download app
-      </button>
-      <button aria-label="Connect Android companion" disabled={preparingCompanionConnection} title="Connect the installed companion without USB" onClick={()=>void openCompanionConnection()}>
-        <ShieldCheck/>{preparingCompanionConnection ? "Preparing QR…" : "Connect companion"}
+      <button disabled={!device || checkingCompanion || installingCompanion} title="Companion works only through the selected USB device"
+        onClick={()=>void (companionStatus?.installed ? openCompanion() : installCompanionDirectly())}>
+        <ShieldCheck/>{checkingCompanion ? "Checking companion…" : installingCompanion ? "Installing…" : companionStatus?.installed ? "Open companion" : "Install companion"}
       </button>
       <div className={`ca-state ${caStatus?.state ?? "unknown"}`} title={caStatus?.detail ?? "Select a device to inspect CA status"}>
         <ShieldCheck/><span>CA {caStatus?.state.replace("_"," ") ?? "unknown"}</span>
@@ -592,27 +465,47 @@ export function App() {
         onClick={()=>void changeCaUsage(true)}><ShieldCheck/>{caChanging ? "Checking…" : "Use CA"}</button>
       <button disabled={caChanging || !device || caStatus?.state === "not_installed"}
         onClick={()=>void changeCaUsage(false)}><X/>Don’t use CA</button>
-      <select aria-label="Package" value={packageName} disabled={appsLoading || connecting}
-        onChange={e=>void selectPackage(e.target.value)}>
-        <option value="">{appsLoading ? "Loading dev packages…" : "Select dev package"}</option>
-        {apps.map(app=><option key={app.package_name}>{app.package_name}</option>)}
-      </select>
-      <button aria-label="Settings" title="Settings"><Settings/></button>
+      <div className="package-picker">
+        <label className="package-search">
+          <Search/>
+          <input aria-label="Search debuggable packages" role="combobox"
+            aria-expanded={packagePickerOpen} aria-controls="package-options"
+            placeholder={appsLoading ? "Loading debug builds…" : "Search debug package…"}
+            value={packageSearch}
+            disabled={appsLoading || connecting || !device}
+            onFocus={()=>setPackagePickerOpen(true)}
+            onChange={event=>{setPackageSearch(event.target.value);setPackagePickerOpen(true);}}
+            onKeyDown={event=>{
+              if (event.key === "Escape") setPackagePickerOpen(false);
+              if (event.key === "Enter" && filteredApps.length === 1) void selectPackage(filteredApps[0].package_name);
+            }}/>
+        </label>
+        {packagePickerOpen && !appsLoading && <div className="package-options" id="package-options" role="listbox">
+          {filteredApps.map(app=><button key={app.package_name} role="option"
+            aria-selected={app.package_name === packageName}
+            onMouseDown={event=>event.preventDefault()}
+            onClick={()=>void selectPackage(app.package_name)}>
+            <span>{app.package_name}</span><small>{app.version_name ? `v${app.version_name}` : "Debug build"}</small>
+          </button>)}
+          {!filteredApps.length && <p>No matching debug packages</p>}
+        </div>}
+      </div>
+      <button title="Settings"><Settings/></button>
     </header>
     {screen === "toolkit" ? <><section className="screen-heading">
       <div><span>Toolkit</span><h1>API traffic</h1></div>
       <p><span className="desktop-host">Desktop host: {desktopHost}</span>Only traffic from the current <b>{packageName || "selected package"}</b> capture is shown.</p>
     </section>
     <section className="filters">
-      <label className="search"><Search/><input aria-label="Search captured traffic" placeholder="Search method, host, path, status…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
-      <button aria-pressed={changedOnly} className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}><Filter/>Changed only</button>
-      <button aria-pressed={errorsOnly} className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}><AlertCircle/>Errors only</button>
+      <label className="search"><Search/><input placeholder="Search method, host, path, status…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
+      <button className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}><Filter/>Changed only</button>
+      <button className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}><AlertCircle/>Errors only</button>
       <button title="Showing today’s captures"><CalendarDays/>Today</button>
       <button disabled={!transactions.length} onClick={()=>void exportCurrentCapture()}><Download/>Export redacted</button>
-      <input ref={importInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={event=>void importPortableCapture(event)} />
+      <input ref={importInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={event=>void importPortableCapture(event)}/>
       <button onClick={()=>importInput.current?.click()}><Upload/>Import capture</button>
-      <button className="danger" title="Permanently delete all saved capture data from this computer"
-        onClick={()=>void deleteAll()}><Trash2/>Delete all</button>
+      <button className="danger" title="Clear this UI session without deleting saved comparison history"
+        onClick={deleteAll}><Trash2/>Delete all</button>
       {capturing ? <><button onClick={()=>setPaused(v=>!v)}>{paused?<Play/>:<Pause/>}{paused?"Resume capture":"Pause capture"}</button>
         <button className="danger" onClick={()=>void stop()}><Square/>Stop capture</button></> :
         <button className="primary" onClick={()=>void start()}><Play/>Start capture</button>}
@@ -644,7 +537,7 @@ export function App() {
       </div>
       <button title="Add exclusion" disabled={!excludeInput.trim()} onClick={addExclusion}><SlidersHorizontal/>Exclude</button>
     </section>
-    {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
+    {notice && <div className="notice">{notice}</div>}
     <section className="workspace">
       <div className="traffic">
         <div className="cache-alert"><AlertCircle/><span><b>Schema comparison</b> · Changes are detected from JSON keys and types, not values.</span></div>
@@ -665,13 +558,13 @@ export function App() {
       </div>
       <aside className="inspector">
         {selected ? <><div className="inspector-title"><div><b>{selected.request.method}</b><strong>{selected.request.host}{selected.request.path}</strong></div>
-          <button aria-label="Copy request URL" onClick={()=>copy(`${selected.request.scheme}://${selected.request.host}${selected.request.path}`)}><Copy/>URL</button></div>
+          <button onClick={()=>copy(`${selected.request.scheme}://${selected.request.host}${selected.request.path}`)}><Copy/>URL</button></div>
           <nav>{(["Overview","Request","Response","Compare","cURL","Logs","Timeline"] as InspectorTab[]).map(name=>
             <button className={tab===name?"active":""} onClick={()=>setTab(name)} key={name}>{name}</button>)}</nav>
           <div className="panel">{tab==="Overview" && <Overview tx={selected}/>}
             {tab==="Request" && <Message headers={selected.request.headers} body={bodyText(selected.request.body)} onCopy={copy}/>}
             {tab==="Response" && <Message headers={selected.response?.headers ?? []} body={bodyText(selected.response?.body)} onCopy={copy}/>}
-            {tab==="Compare" && <Compare tx={selected} onPin={()=>void pinBaseline(selected)} onRemove={()=>void removeBaseline(selected)}/>}
+            {tab==="Compare" && <Compare tx={selected}/>}
             {tab==="cURL" && <Code value={selected.curl?.multiline ?? "cURL is generated when the request is captured."} onCopy={copy}/>}
             {tab==="Logs" && <Logs incidents={incidents.filter(incident => selected.correlated_incidents.includes(incident.id))}/>}
             {tab==="Timeline" && <Timeline tx={selected}/>}</div>
@@ -689,25 +582,6 @@ export function App() {
         <button className="primary submit" onClick={()=>{setCertificateInstall(undefined); void start();}}>I installed it — start capture</button>
       </section>
     </div>}
-    {companionInstall && <div className="modal-backdrop" role="presentation">
-      <section className="qr-dialog connection-dialog" role="dialog" aria-modal="true" aria-labelledby="companion-title">
-        <button className="close" aria-label="Close" onClick={()=>setCompanionInstall(undefined)}><X/></button>
-        <div className="qr-heading"><ShieldCheck/><div><h2 id="companion-title">Install App Tester Companion 0.2.2</h2><p>Includes mobile disconnect controls</p></div></div>
-        <div className="qr-image" dangerouslySetInnerHTML={{__html:companionInstall.qr_svg}} />
-        <ol><li>Scan this code with the phone camera.</li><li>Download the signed APK from the App Tester GitHub repository.</li><li>Approve Android’s one-time install confirmation, then open the companion.</li></ol>
-        {device && <button className="primary submit" disabled={installingCompanion} onClick={()=>void installCompanionDirectly()}>{installingCompanion ? "Installing…" : "Install directly on selected device"}</button>}
-        <p className="warning">If Android blocks browser downloads, select a paired Wi-Fi device above and use direct install.</p>
-      </section>
-    </div>}
-    {companionConnection && <div className="modal-backdrop" role="presentation">
-      <section className="qr-dialog connection-dialog" role="dialog" aria-modal="true" aria-labelledby="companion-connect-title">
-        <button className="close" aria-label="Close" onClick={()=>setCompanionConnection(undefined)}><X/></button>
-        <div className="qr-heading"><Wifi/><div><h2 id="companion-connect-title">Connect companion</h2><p>Requires Companion 0.2 or newer</p></div></div>
-        <div className="qr-image" dangerouslySetInnerHTML={{__html:companionConnection.qr_svg}} />
-        <p>Open App Tester Companion and scan. Installed apps will appear in the package picker automatically.</p>
-        <button onClick={()=>{setCompanionConnection(undefined); void openCompanionInstall();}}>Install companion instead</button>
-      </section>
-    </div>}
   </section></main>;
 }
 function Overview({tx}:{tx:HttpTransaction}) { return <div className="overview">
@@ -722,30 +596,8 @@ function Message({headers,body,onCopy}:{headers:{name:string;value:string}[];bod
     <h3>Body <button onClick={()=>onCopy(body)}><Copy/>Copy raw</button></h3><pre>{jsonView(body) || "No body"}</pre></>;
 }
 function Code({value,onCopy}:{value:string;onCopy:(v:string)=>void}) { return <div className="code"><button onClick={()=>onCopy(value)}><Copy/>Copy</button><pre>{value}</pre></div>; }
-function Compare({tx,onPin,onRemove}:{tx:HttpTransaction;onPin:()=>void;onRemove:()=>void}) {
-  const diffs=tx.comparison?.differences ?? [];
-  const endpointId = baselineKey(tx);
-  const canPin=Boolean(endpointId && tx.response);
-  const [rules, setRules] = useState<ComparisonRules>({ignored_json_pointers:[], volatile_keys:[]});
-  const [rulesMessage, setRulesMessage] = useState("");
-  useEffect(() => {
-    if (!endpointId) { setRules({ignored_json_pointers:[], volatile_keys:[]}); return; }
-    void api.getComparisonRules(endpointId).then(setRules).catch(() => setRulesMessage("Could not load comparison rules."));
-  }, [endpointId]);
-  const saveRules = async () => {
-    if (!endpointId) return;
-    try { await api.saveComparisonRules(endpointId, rules); setRulesMessage("Rules saved for future comparisons."); }
-    catch (error) { setRulesMessage(`Could not save rules: ${String(error)}`); }
-  };
-  return <div className="compare-panel">
+function Compare({tx}:{tx:HttpTransaction}) { const diffs=tx.comparison?.differences ?? []; return <div className="compare-panel">
   <div className="compare-toolbar"><div><b>DTO schema comparison</b><span>Values and array lengths are ignored</span></div><span className="compare-mode">Key structure</span></div>
-  <div className="compare-toolbar"><span>{tx.comparison?.baseline_transaction_id ? "Compared with a saved or recent baseline" : "No saved baseline selected"}</span>
-    <div><button disabled={!canPin} onClick={onPin}>Pin as baseline</button><button disabled={!canPin} onClick={onRemove}>Remove baseline</button></div></div>
-  <section className="comparison-rules"><h3>Comparison rules</h3><p>Ignore exact JSON paths or volatile key names for this endpoint.</p>
-    <label>Ignored JSON paths<input aria-label="Ignored JSON paths" value={rules.ignored_json_pointers.join(", ")} onChange={event=>setRules(current=>({...current,ignored_json_pointers:event.target.value.split(",").map(value=>value.trim()).filter(Boolean)}))} placeholder="$.updatedAt, $.meta.requestId"/></label>
-    <label>Volatile key names<input aria-label="Volatile key names" value={rules.volatile_keys.join(", ")} onChange={event=>setRules(current=>({...current,volatile_keys:event.target.value.split(",").map(value=>value.trim()).filter(Boolean)}))} placeholder="timestamp, requestId"/></label>
-    <button disabled={!endpointId} onClick={()=>void saveRules()}>Save rules</button>{rulesMessage && <span>{rulesMessage}</span>}
-  </section>
   <h3>{diffs.length ? `${diffs.length} schema differences` : tx.comparison?.baseline_transaction_id ? "DTO shape unchanged" : "No compatible comparison available"}</h3>
   {diffs.map((diff,i)=><article className={`diff ${diff.severity}`} key={i}><b>{diff.path ?? diff.kind}</b><span>{diff.explanation}</span>
     <pre>Previous: {diff.previous ?? "—"}{"\n"}Current: {diff.current ?? "—"}</pre></article>)}</div>; }
@@ -756,9 +608,8 @@ function Logs({incidents}:{incidents:LogIncident[]}) { return incidents.length ?
 function LogInspector({incidents, packageName, capturing, onStart}:{
   incidents:LogIncident[]; packageName:string; capturing:boolean; onStart:()=>void;
 }) {
-  const errors = incidents.filter(item => ["crash","error","anr","dto_parsing"].includes(item.category)).length;
-  const warnings = incidents.length - errors;
-  const latest = incidents[0];
+  const visibleIncidents = incidents.filter(incident => !isInterceptionTlsNoise(incident));
+  const {total, errors, warnings} = incidentTotals(visibleIncidents);
   return <section className="log-screen">
     <div className="screen-heading">
       <div><span>Inspect logs</span><h1>Detected app issues</h1></div>
@@ -766,25 +617,23 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
       {!capturing && <button className="primary" onClick={onStart}><Play/>Start capture</button>}
     </div>
     <div className="log-summary">
-      <article><span>Total detected</span><strong>{incidents.length}</strong><small>Actionable issues</small></article>
+      <article><span>Total detected</span><strong>{total}</strong><small>{visibleIncidents.length} unique issue{visibleIncidents.length === 1 ? "" : "s"}</small></article>
       <article className="error"><span>Errors</span><strong>{errors}</strong><small>Crashes and failures</small></article>
       <article><span>Warnings</span><strong>{warnings}</strong><small>Potential problems</small></article>
       <article><span>Package</span><b>{packageName || "Not selected"}</b><small>{capturing ? "Monitoring live" : "Capture stopped"}</small></article>
-      {latest && <article className="issue-overview">
-        <div><span>Latest issue · How it happened</span><strong>{latest.title}</strong><p>{latest.summary}</p>
-          {latest.root_cause && <small>Root cause: {latest.root_cause}</small>}</div>
-        <div><span>Screen &amp; navigation context</span><code>{incidentLocation(latest, packageName)}</code>
-          <small>{new Date(latest.occurred_at).toLocaleString()}</small></div>
-      </article>}
     </div>
     <div className="log-list">
-      {incidents.map(incident => <article className="log-card" key={incident.id}>
-        <div className="log-severity"><AlertCircle/><span>{incident.category.replaceAll("_"," ")}</span></div>
+      {visibleIncidents.map(incident => <details className="log-card" key={incident.id}>
+        <summary className="log-row">
+          <span className="log-severity"><AlertCircle/><b>{incident.category.replaceAll("_"," ")}</b></span>
+          <span className="log-row-main"><b>{incident.title}</b><small>{incidentLocation(incident, packageName)}</small></span>
+          <span className="log-count">{incident.occurrence_count}x</span>
+          <time>{new Date(incident.occurred_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</time>
+          <ChevronDown className="log-chevron"/>
+        </summary>
         <div className="log-content">
-          <div className="log-title"><div><h2>{incident.title}</h2><p>{incident.summary}</p>
-            <small>{incident.occurrence_count} occurrence{incident.occurrence_count === 1 ? "" : "s"}</small>
-            {incident.root_cause && <small>Root cause: {incident.root_cause}</small>}</div>
-            <time>{new Date(incident.occurred_at).toLocaleTimeString()}</time></div>
+          <div className="log-title"><div><p>{incident.summary}</p>
+            {incident.root_cause && <small>Root cause: {incident.root_cause}</small>}</div></div>
           <div className="detected-at"><span>Screen &amp; navigation context</span>
             <code>{incidentLocation(incident, packageName)}</code></div>
           <div className="issue-analysis"><h3>How it happened</h3><p>{incident.how_occurred}</p>
@@ -794,8 +643,8 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
           <details><summary>View {incident.lines.length} captured log {incident.lines.length === 1 ? "line" : "lines"}</summary>
             <div className="log-evidence"><button onClick={()=>void navigator.clipboard.writeText(logEvidence(incident.lines))}><Copy/>Copy redacted evidence</button><pre>{logEvidence(incident.lines)}</pre></div></details>
         </div>
-      </article>)}
-      {!incidents.length && <div className="empty log-empty"><ShieldCheck/><strong>No issues detected</strong>
+      </details>)}
+      {!visibleIncidents.length && <div className="empty log-empty"><ShieldCheck/><strong>No app issues detected</strong>
         <span>{capturing ? `App Tester is monitoring ${packageName}. Detected errors will appear here with their source.`
           : "Start capture to monitor errors and warnings for the selected dev package."}</span></div>}
     </div>

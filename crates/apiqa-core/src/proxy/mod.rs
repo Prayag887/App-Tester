@@ -40,23 +40,6 @@ pub enum ProxyStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompanionApp {
-    pub package_name: String,
-    pub label: String,
-}
-
-#[derive(Debug, Clone, Default)]
-struct CompanionLink {
-    apps: Vec<CompanionApp>,
-    selected_package: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct CompanionRegistration {
-    token: String,
-    apps: Vec<CompanionApp>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfiguration {
     pub bind_address: String,
     pub port: u16,
@@ -115,7 +98,6 @@ struct CaptureHandler {
     database: Arc<Database>,
     events: EventBroadcaster,
     preview_limit: usize,
-    companion_links: Arc<DashMap<String, CompanionLink>>,
 }
 fn headers(map: &hudsucker::hyper::HeaderMap) -> Vec<HeaderEntry> {
     map.iter()
@@ -230,48 +212,6 @@ impl HttpHandler for CaptureHandler {
         request: Request<Body>,
     ) -> RequestOrResponse {
         let (parts, body) = request.into_parts();
-        if parts.uri.path() == "/__app_tester/companion/register" {
-            let response = match body.collect().await {
-                Ok(collected) => {
-                    serde_json::from_slice::<CompanionRegistration>(&collected.to_bytes())
-                        .map(|registration| {
-                            self.companion_links.insert(
-                                registration.token,
-                                CompanionLink {
-                                    apps: registration.apps,
-                                    selected_package: None,
-                                },
-                            );
-                            Response::new(Body::from("{\"connected\":true}"))
-                        })
-                        .unwrap_or_else(|_| {
-                            Response::builder()
-                                .status(400)
-                                .body(Body::from("invalid registration"))
-                                .expect("valid response")
-                        })
-                }
-                Err(_) => Response::builder()
-                    .status(400)
-                    .body(Body::from("invalid body"))
-                    .expect("valid response"),
-            };
-            return response.into();
-        }
-        if parts.uri.path() == "/__app_tester/companion/config" {
-            let token = parts.uri.query().and_then(|query| {
-                url::form_urlencoded::parse(query.as_bytes())
-                    .find(|(name, _)| name == "token")
-                    .map(|(_, value)| value.into_owned())
-            });
-            let package_name = token.and_then(|token| {
-                self.companion_links
-                    .get(&token)
-                    .and_then(|link| link.selected_package.clone())
-            });
-            let body = serde_json::json!({"package_name": package_name}).to_string();
-            return Response::new(Body::from(body)).into();
-        }
         let now = OffsetDateTime::now_utc();
         let id = Uuid::new_v4();
         self.current_id = Some(id);
@@ -512,7 +452,6 @@ pub struct ProxyService {
     transactions: Arc<DashMap<Uuid, HttpTransaction>>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
     task: Mutex<Option<JoinHandle<()>>>,
-    companion_links: Arc<DashMap<String, CompanionLink>>,
 }
 impl ProxyService {
     pub fn new(
@@ -528,7 +467,6 @@ impl ProxyService {
             transactions: Arc::new(DashMap::new()),
             shutdown: Mutex::new(None),
             task: Mutex::new(None),
-            companion_links: Arc::new(DashMap::new()),
         }
     }
     pub fn status(&self) -> ProxyStatus {
@@ -539,23 +477,6 @@ impl ProxyService {
     }
     pub fn events(&self) -> EventBroadcaster {
         self.events.clone()
-    }
-    pub fn companion_apps(&self, token: &str) -> Vec<CompanionApp> {
-        self.companion_links
-            .get(token)
-            .map(|link| link.apps.clone())
-            .unwrap_or_default()
-    }
-    pub fn select_companion_package(&self, token: &str, package_name: &str) -> anyhow::Result<()> {
-        let mut link = self
-            .companion_links
-            .get_mut(token)
-            .ok_or_else(|| anyhow::anyhow!("companion has not connected yet"))?;
-        if !link.apps.iter().any(|app| app.package_name == package_name) {
-            anyhow::bail!("package was not reported by the companion");
-        }
-        link.selected_package = Some(package_name.to_owned());
-        Ok(())
     }
     fn set_status(&self, status: ProxyStatus) {
         *self.status.lock().expect("proxy status lock") = status;
@@ -609,7 +530,6 @@ impl ProxyService {
             database: self.database.clone(),
             events: self.events.clone(),
             preview_limit: 1024 * 1024,
-            companion_links: self.companion_links.clone(),
         };
         let proxy = Proxy::builder()
             .with_addr(bind_address)

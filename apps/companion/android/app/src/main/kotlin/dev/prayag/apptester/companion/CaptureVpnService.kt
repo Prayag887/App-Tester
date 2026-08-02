@@ -17,6 +17,7 @@ class CaptureVpnService : VpnService() {
     private var tun: ParcelFileDescriptor? = null
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private var failures = 0
+    private var monitoringStarted = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val host = intent?.getStringExtra(EXTRA_HOST) ?: return START_NOT_STICKY
@@ -39,8 +40,11 @@ class CaptureVpnService : VpnService() {
                 ?: error("Android could not establish the capture VPN.")
             val error = VpnNative.start(tun!!.detachFd(), "http://$host:$port")
             require(error.isEmpty()) { error }
-            ProxySafetyController(this).record("VPN capture relay active for $packageName via $host:$port")
-            scheduler.scheduleWithFixedDelay({ checkDesktop(host, port) }, CHECK_INTERVAL_SECONDS, CHECK_INTERVAL_SECONDS, TimeUnit.SECONDS)
+            ProxySafetyController(this).markVpnActive(packageName)
+            if (!monitoringStarted) {
+                monitoringStarted = true
+                scheduler.scheduleWithFixedDelay({ checkDesktop(host, port) }, CHECK_INTERVAL_SECONDS, CHECK_INTERVAL_SECONDS, TimeUnit.SECONDS)
+            }
         }.onFailure { error ->
             ProxySafetyController(this).record("VPN relay could not start: ${error.message ?: error.javaClass.simpleName}")
             ProxySafetyController(this).stopVpn("VPN relay could not start. Direct networking resumed.")
@@ -99,8 +103,8 @@ class CaptureVpnService : VpnService() {
         private const val CHANNEL_ID = "capture_vpn"
         private const val NOTIFICATION_ID = 22
         private const val MTU = 1500
-        private const val CHECK_INTERVAL_SECONDS = 5L
-        private const val CONNECT_TIMEOUT_MS = 1500
-        private const val MAX_FAILURES = 3
+        private const val CHECK_INTERVAL_SECONDS = 1L
+        private const val CONNECT_TIMEOUT_MS = 500
+        private const val MAX_FAILURES = 1
     }
 }

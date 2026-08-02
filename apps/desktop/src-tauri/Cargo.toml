@@ -20,5 +20,4 @@ tokio.workspace = true
 uuid.workspace = true
 time.workspace = true
 reqwest.workspace = true
-qrcode.workspace = true
 rfd = "0.15.4"

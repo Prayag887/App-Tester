@@ -1,16 +1,26 @@
 # Changelog
 
-## [0.1.2] - 2026-07-30
+## [0.2.0] - 2026-08-02
 
 ### Added
 
-- Safer capture import and export with redacted metadata and replay safeguards.
-- More resilient USB-to-Wi-Fi ADB handoff and proxy/CA cleanup recovery.
+- USB-only Android companion installation, launch, capture relay, and disconnect controls.
+- Companion-managed HTTPS CA setup/removal guidance and immediate direct-network recovery.
+- Searchable debug-package picker that opens the selected Android application.
+- Specific DNS, timeout, connection, DTO, database, memory, and framework log summaries.
+- Safe capture import/export with redacted metadata and replay safeguards.
 
 ### Changed
 
-- Log incidents now present a single copyable, redacted evidence block.
-- TLS reports select the actual certificate failure and give certificate-specific reproduction guidance.
+- Android capture now uses per-app VPN traffic through `adb reverse` instead of a global device proxy.
+- USB loss stops interception on the phone within one failed relay health check.
+- Desktop releases embed one signed companion APK across macOS, Windows, and Linux builds.
+- Log incidents use one compact, expandable, copyable, redacted evidence block.
+- Logcat capture reconnects after transient ADB transport failures.
+
+### Removed
+
+- QR scanning, camera permission, Wi-Fi pairing, wireless ADB handoff, and LAN companion registration.
 
 ## [0.1.1] - 2026-07-26
 

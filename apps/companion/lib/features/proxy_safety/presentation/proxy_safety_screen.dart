@@ -1,231 +1,166 @@
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../shared/brand/app_tester_mark.dart';
 import 'proxy_safety_view_model.dart';
 
-class ProxySafetyScreen extends StatefulWidget {
+class ProxySafetyScreen extends StatelessWidget {
   const ProxySafetyScreen({required this.viewModel, super.key});
 
   final ProxySafetyViewModel viewModel;
 
   @override
-  State<ProxySafetyScreen> createState() => _ProxySafetyScreenState();
-}
-
-class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
-  final _scanner = MobileScannerController(autoStart: false);
-  bool _scanning = false;
-
-  Future<void> _startScanner() async {
-    if (_scanning || widget.viewModel.status?.isVpnActive == true) return;
-    setState(() => _scanning = true);
-    await _scanner.start();
-  }
-
-  Future<void> _onDetect(BarcodeCapture capture) async {
-    final payload = capture.barcodes.firstOrNull?.rawValue;
-    if (payload == null || widget.viewModel.isWorking) return;
-    await _scanner.stop();
-    if (mounted) setState(() => _scanning = false);
-    await widget.viewModel.connectFromQr(payload);
-  }
-
-  @override
-  void dispose() {
-    _scanner.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) => AnimatedBuilder(
-        animation: widget.viewModel,
+        animation: viewModel,
         builder: (context, _) {
-          final model = widget.viewModel;
-          final active = model.status?.isVpnActive == true;
-          final connected = active || model.status?.isMonitoring == true;
+          final active = viewModel.status?.isVpnActive == true;
+          final packageName = viewModel.status?.targetPackage;
           return Scaffold(
             body: SafeArea(
-              child: LayoutBuilder(builder: (context, constraints) {
-                final wide = constraints.maxWidth >= 720;
-                final scanPanel = _ScanPanel(
-                  active: connected,
-                  scanning: _scanning,
-                  scanner: _scanner,
-                  onDetect: _onDetect,
-                  onStart: _startScanner,
-                );
-                final connectionPanel = _ConnectionPanel(model: model, active: active, connected: connected, onDisconnect: () async {
-                  await model.disconnect();
-                });
-                return SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(wide ? 32 : 18, 18, wide ? 32 : 18, 30),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 980),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const _Header(),
-                        const SizedBox(height: 24),
-                        if (wide)
-                          SizedBox(height: constraints.maxHeight - 130, child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(flex: 6, child: scanPanel), const SizedBox(width: 24), Expanded(flex: 5, child: connectionPanel)]))
-                        else ...[
-                          scanPanel,
-                          const SizedBox(height: 22),
-                          connectionPanel,
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Row(children: [
+                          AppTesterMark(size: 48),
+                          SizedBox(width: 14),
+                          Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('App Tester',
+                                    style: TextStyle(
+                                        fontSize: 21,
+                                        fontWeight: FontWeight.w700)),
+                                Text('USB Companion',
+                                    style: TextStyle(color: Color(0xff8ea6c9))),
+                              ]),
+                        ]),
+                        const SizedBox(height: 36),
+                        Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: active
+                                ? const Color(0xff103831)
+                                : const Color(0xff0d1d35),
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                                color: active
+                                    ? const Color(0xff246f5d)
+                                    : const Color(0xff203651)),
+                          ),
+                          child: Column(children: [
+                            Icon(
+                                active
+                                    ? Icons.usb_rounded
+                                    : Icons.usb_off_rounded,
+                                size: 72,
+                                color: active
+                                    ? const Color(0xff2be0a7)
+                                    : const Color(0xff82baff)),
+                            const SizedBox(height: 18),
+                            Text(
+                                active
+                                    ? 'USB capture active'
+                                    : 'Waiting for desktop',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 10),
+                            Text(
+                              active
+                                  ? 'Capturing only ${packageName ?? 'selected app'}. Disconnecting USB stops interception and restores direct networking.'
+                                  : 'Connect this phone with USB, then choose Open companion or Start capture in App Tester desktop.',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                  color: Color(0xffaebfd8), height: 1.5),
+                            ),
+                          ]),
+                        ),
+                        if (viewModel.error != null) ...[
+                          const SizedBox(height: 16),
+                          Text(viewModel.error!,
+                              style: const TextStyle(color: Color(0xffff9bac))),
                         ],
-                      ]),
+                        if (viewModel.status?.message case final message?) ...[
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: const Color(0xff13243b),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Text(message,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    color: Color(0xffb8c9e3), height: 1.4)),
+                          ),
+                        ],
+                        const SizedBox(height: 20),
+                        FilledButton.icon(
+                          onPressed: viewModel.isWorking ||
+                                  active ||
+                                  viewModel.status?.host == null ||
+                                  packageName == null
+                              ? null
+                              : viewModel.connect,
+                          icon: Icon(active
+                              ? Icons.desktop_windows_rounded
+                              : Icons.cable_rounded),
+                          label: Text(active
+                              ? 'Connected to desktop'
+                              : 'Connect to desktop'),
+                          style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(56)),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: viewModel.isWorking ||
+                                  viewModel.status?.caAvailable != true
+                              ? null
+                              : viewModel.installCa,
+                          icon: const Icon(Icons.verified_user_outlined),
+                          label: const Text('Install HTTPS CA'),
+                          style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(52)),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed:
+                              viewModel.isWorking ? null : viewModel.removeCa,
+                          icon: const Icon(Icons.remove_moderator_outlined),
+                          label: const Text('Remove HTTPS CA'),
+                          style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(52)),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed:
+                              viewModel.isWorking ? null : viewModel.disconnect,
+                          icon: const Icon(Icons.link_off_rounded),
+                          label: Text(active
+                              ? 'Stop interception'
+                              : 'Ensure interception is stopped'),
+                          style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(52)),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'For HTTPS, install AppTester-HTTPS-CA.pem from Downloads. Remove HTTPS CA opens Android Trusted credentials, where Android requires you to confirm removal. Removing USB or tapping Stop interception always restores direct networking.',
+                          textAlign: TextAlign.center,
+                          style:
+                              TextStyle(color: Color(0xff8ea6c9), height: 1.4),
+                        ),
+                      ],
                     ),
                   ),
-                );
-              }),
+                ),
+              ),
             ),
           );
         },
-      );
-}
-
-class _Header extends StatelessWidget {
-  const _Header();
-
-  @override
-  Widget build(BuildContext context) => const Row(children: [
-        AppTesterMark(size: 44),
-        SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('App Tester', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-          Text('Companion', style: TextStyle(color: Color(0xff8ea6c9))),
-        ])),
-      ]);
-}
-
-class _ScanPanel extends StatelessWidget {
-  const _ScanPanel({required this.active, required this.scanning, required this.scanner, required this.onDetect, required this.onStart});
-  final bool active;
-  final bool scanning;
-  final MobileScannerController scanner;
-  final void Function(BarcodeCapture) onDetect;
-  final Future<void> Function() onStart;
-
-  @override
-  Widget build(BuildContext context) => AnimatedSwitcher(
-        duration: const Duration(milliseconds: 450),
-        child: active
-            ? const _SuccessVisual(key: ValueKey('active'))
-            : Column(key: const ValueKey('scanner'), crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Scan connection code', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 6),
-                const Text('Open App Tester on your computer, select an app, then choose Connect companion.', style: TextStyle(color: Color(0xffaebfd8), height: 1.4)),
-                const SizedBox(height: 18),
-                if (scanning)
-                  AspectRatio(
-                    aspectRatio: 1,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(24),
-                      child: Stack(fit: StackFit.expand, children: [
-                        MobileScanner(controller: scanner, onDetect: onDetect),
-                        const _ScannerFrame(),
-                      ]),
-                    ),
-                  )
-                else
-                  FilledButton.icon(
-                    onPressed: () => onStart(),
-                    icon: const Icon(Icons.qr_code_scanner_rounded),
-                    label: const Text('Scan connection code'),
-                  ),
-              ]),
-      );
-}
-
-class _ScannerFrame extends StatelessWidget {
-  const _ScannerFrame();
-  @override
-  Widget build(BuildContext context) => IgnorePointer(
-        child: DecoratedBox(
-          decoration: BoxDecoration(border: Border.all(color: const Color(0xff2be0a7), width: 2), borderRadius: BorderRadius.circular(24)),
-          child: Center(child: Container(width: 180, height: 180, decoration: BoxDecoration(border: Border.all(color: Colors.white70, width: 2), borderRadius: BorderRadius.circular(18)))),
-        ),
-      );
-}
-
-class _SuccessVisual extends StatelessWidget {
-  const _SuccessVisual({super.key});
-  @override
-  Widget build(BuildContext context) => Container(
-        constraints: const BoxConstraints(minHeight: 320),
-        decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xff123a36), Color(0xff0b2032)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(28)),
-        child: Center(child: TweenAnimationBuilder<double>(tween: Tween(begin: 0.7, end: 1), duration: const Duration(milliseconds: 550), curve: Curves.easeOutBack, builder: _buildCheck)),
-      );
-
-  static Widget _buildCheck(BuildContext context, double scale, Widget? child) => Transform.scale(scale: scale, child: const Icon(Icons.check_circle_rounded, size: 112, color: Color(0xff2be0a7)));
-}
-
-class _ConnectionPanel extends StatelessWidget {
-  const _ConnectionPanel({required this.model, required this.active, required this.connected, required this.onDisconnect});
-  final ProxySafetyViewModel model;
-  final bool active;
-  final bool connected;
-  final Future<void> Function() onDisconnect;
-
-  @override
-  Widget build(BuildContext context) {
-    final network = switch (model.networkMatch) {
-      NetworkMatch.sameWifi => ('Same Wi-Fi confirmed', Icons.wifi_rounded, const Color(0xff2be0a7)),
-      NetworkMatch.reachable => ('Desktop reachable; Wi-Fi name unavailable', Icons.wifi_find_rounded, const Color(0xffffc66d)),
-      NetworkMatch.unreachable => ('Not on same reachable network', Icons.wifi_off_rounded, const Color(0xffff879a)),
-      NetworkMatch.unknown => ('Wi-Fi not checked yet', Icons.wifi_find_rounded, const Color(0xff8ea6c9)),
-    };
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      AnimatedContainer(
-        duration: const Duration(milliseconds: 350),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(color: active ? const Color(0xff103831) : const Color(0xff0d1d35), borderRadius: BorderRadius.circular(20), border: Border.all(color: active ? const Color(0xff246f5d) : const Color(0xff203651))),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(active ? Icons.link_rounded : Icons.qr_code_scanner_rounded, color: active ? const Color(0xff2be0a7) : const Color(0xff82baff), size: 34),
-          const SizedBox(height: 16),
-          Text(active ? 'Capture connected' : connected ? 'Desktop connected' : model.isWorking ? 'Connecting…' : 'Ready to scan', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 7),
-          Text(active ? 'Traffic is flowing to App Tester. You can leave this screen open or switch apps.' : connected ? 'Waiting for a package selection from App Tester.' : 'Host and port are configured from the QR code.', style: const TextStyle(color: Color(0xffaebfd8), height: 1.4)),
-        ]),
-      ),
-      const SizedBox(height: 14),
-      _StatusRow(icon: network.$2, color: network.$3, title: network.$1),
-      if (model.status?.targetPackage case final package?) ...[
-        const SizedBox(height: 10),
-        _StatusRow(icon: Icons.android_rounded, color: const Color(0xff82baff), title: package),
-      ],
-      if (model.error != null) ...[
-        const SizedBox(height: 14),
-        _ErrorMessage(model.error!),
-      ],
-      if (connected) ...[
-        const SizedBox(height: 18),
-        OutlinedButton.icon(onPressed: model.isWorking ? null : onDisconnect, icon: const Icon(Icons.link_off_rounded), label: const Text('Disconnect from desktop'), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50))),
-      ],
-    ]);
-  }
-}
-
-class _StatusRow extends StatelessWidget {
-  const _StatusRow({required this.icon, required this.color, required this.title});
-  final IconData icon;
-  final Color color;
-  final String title;
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-        decoration: BoxDecoration(color: const Color(0xff0a1729), borderRadius: BorderRadius.circular(14)),
-        child: Row(children: [Icon(icon, color: color, size: 21), const SizedBox(width: 11), Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)))]),
-      );
-}
-
-class _ErrorMessage extends StatelessWidget {
-  const _ErrorMessage(this.message);
-  final String message;
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: const Color(0xff421c27), borderRadius: BorderRadius.circular(14)),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Icon(Icons.error_outline, color: Color(0xffff9bac)), const SizedBox(width: 10), Expanded(child: Text(message, style: const TextStyle(height: 1.35)))]),
       );
 }

@@ -1,38 +1,8 @@
 use crate::{AdbRunner, DeviceError};
-use qrcode::{QrCode, render::svg};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::{
-    net::{TcpStream, ToSocketAddrs},
-    path::Path,
-    time::Duration,
-};
-use time::OffsetDateTime;
-use uuid::Uuid;
-
-#[derive(Debug, Clone)]
-pub struct QrPairingSecret {
-    pub id: Uuid,
-    pub service_name: String,
-    pub password: String,
-    pub expires_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QrPairingChallenge {
-    pub id: Uuid,
-    pub service_name: String,
-    pub qr_payload: String,
-    pub qr_svg: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub expires_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QrPairingResult {
-    pub endpoint: String,
-    pub adb_output: String,
-}
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AndroidCertificateInstall {
@@ -65,191 +35,6 @@ pub fn prepare_certificate_install(
         remote_path: remote_path.into(),
         installer_output: installer_output.trim().to_owned(),
     })
-}
-
-pub fn pair_with_code(
-    runner: &dyn AdbRunner,
-    host: &str,
-    port: u16,
-    pairing_code: &str,
-) -> Result<QrPairingResult, DeviceError> {
-    validate_host(host)?;
-    if port == 0 {
-        return Err(DeviceError::Adb(
-            "pairing port must be between 1 and 65535".into(),
-        ));
-    }
-    if pairing_code.len() != 6 || !pairing_code.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(DeviceError::Adb(
-            "pairing code must contain exactly six digits".into(),
-        ));
-    }
-    let endpoint = format!("{host}:{port}");
-    let output = runner.run(&["pair", &endpoint, pairing_code])?;
-    if !output.to_ascii_lowercase().contains("successfully paired") {
-        return Err(DeviceError::Adb(output.trim().to_owned()));
-    }
-    Ok(QrPairingResult {
-        endpoint,
-        adb_output: output.trim().to_owned(),
-    })
-}
-
-pub fn enable_usb_wifi(
-    runner: &dyn AdbRunner,
-    serial: &str,
-    port: u16,
-) -> Result<QrPairingResult, DeviceError> {
-    let endpoint = prepare_usb_wifi(runner, serial, port)?;
-    connect_usb_wifi(runner, &endpoint)
-}
-
-/// Switches the selected USB device to ADB-over-TCP and returns its endpoint.
-/// Callers can validate local network reachability before starting the ADB
-/// connection handshake.
-pub fn prepare_usb_wifi(
-    runner: &dyn AdbRunner,
-    serial: &str,
-    port: u16,
-) -> Result<String, DeviceError> {
-    if port == 0 {
-        return Err(DeviceError::Adb(
-            "ADB Wi-Fi port must be between 1 and 65535".into(),
-        ));
-    }
-    let routes = runner.run(&["-s", serial, "shell", "ip", "route"])?;
-    let host = parse_wifi_ipv4(&routes).ok_or_else(|| {
-        DeviceError::Adb(
-            "could not determine the device Wi-Fi address; connect manually using its IP".into(),
-        )
-    })?;
-    // `adb tcpip` intentionally tears down the USB transport. Resolve the device address
-    // first, while the selected serial is still reachable.
-    runner.run(&["-s", serial, "tcpip", &port.to_string()])?;
-    Ok(format!("{host}:{port}"))
-}
-
-pub fn connect_usb_wifi(
-    runner: &dyn AdbRunner,
-    endpoint: &str,
-) -> Result<QrPairingResult, DeviceError> {
-    let output = runner.run(&["connect", endpoint])?;
-    if !output.to_ascii_lowercase().contains("connected") {
-        return Err(DeviceError::Adb(output.trim().to_owned()));
-    }
-    Ok(QrPairingResult {
-        endpoint: endpoint.to_owned(),
-        adb_output: output.trim().to_owned(),
-    })
-}
-
-/// Verifies that the desktop can reach the ADB TCP listener before attempting
-/// the ADB handshake. Some Wi-Fi access points isolate clients even when both
-/// devices receive addresses in the same subnet; without this check `adb
-/// connect` can appear to hang and leave the capture handoff ambiguous.
-pub fn verify_adb_wifi_endpoint(endpoint: &str, timeout: Duration) -> Result<(), DeviceError> {
-    let address = endpoint
-        .to_socket_addrs()
-        .map_err(|_| DeviceError::Adb("invalid Wi-Fi ADB endpoint".into()))?
-        .find(|address| address.is_ipv4())
-        .ok_or_else(|| DeviceError::Adb("invalid Wi-Fi ADB endpoint".into()))?;
-    TcpStream::connect_timeout(&address, timeout).map_err(|error| {
-        DeviceError::Adb(format!(
-            "the phone's Wi-Fi ADB port is unreachable ({error}). Check that both devices are on the same non-isolated Wi-Fi network; guest/client-isolated networks block USB-to-Wi-Fi capture"
-        ))
-    })?;
-    Ok(())
-}
-
-fn validate_host(host: &str) -> Result<(), DeviceError> {
-    let valid = !host.is_empty()
-        && host.len() <= 253
-        && host
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':'));
-    if valid {
-        Ok(())
-    } else {
-        Err(DeviceError::Adb("invalid device host or IP address".into()))
-    }
-}
-
-pub fn validate_companion_connection(host: &str) -> Result<(), DeviceError> {
-    validate_host(host)
-}
-
-pub fn parse_wifi_ipv4(routes: &str) -> Option<String> {
-    let expression =
-        Regex::new(r"\bsrc ((?:\d{1,3}\.){3}\d{1,3})\b").expect("valid IP route regex");
-    expression
-        .captures(routes)
-        .and_then(|captures| captures.get(1))
-        .map(|address| address.as_str().to_owned())
-}
-
-pub fn create_qr_pairing() -> Result<(QrPairingChallenge, QrPairingSecret), DeviceError> {
-    let id = Uuid::new_v4();
-    let compact = id.simple().to_string();
-    let service_name = format!("studio-app-tester-{}", &compact[..10]);
-    let password = compact[10..26].to_owned();
-    let qr_payload = format!("WIFI:T:ADB;S:{service_name};P:{password};;");
-    let code = QrCode::new(qr_payload.as_bytes())
-        .map_err(|error| DeviceError::Adb(format!("failed to generate pairing QR: {error}")))?;
-    let qr_svg = code
-        .render::<svg::Color>()
-        .min_dimensions(320, 320)
-        .dark_color(svg::Color("#08110f"))
-        .light_color(svg::Color("#ffffff"))
-        .build();
-    let expires_at = OffsetDateTime::now_utc() + time::Duration::minutes(2);
-    Ok((
-        QrPairingChallenge {
-            id,
-            service_name: service_name.clone(),
-            qr_payload,
-            qr_svg,
-            expires_at,
-        },
-        QrPairingSecret {
-            id,
-            service_name,
-            password,
-            expires_at,
-        },
-    ))
-}
-
-pub fn parse_mdns_pairing_endpoint(output: &str, service_name: &str) -> Option<String> {
-    output.lines().find_map(|line| {
-        let fields = line.split_whitespace().collect::<Vec<_>>();
-        (fields.first().is_some_and(|name| *name == service_name)
-            && fields
-                .get(1)
-                .is_some_and(|kind| *kind == "_adb-tls-pairing._tcp"))
-        .then(|| fields.get(2).map(|endpoint| (*endpoint).to_owned()))
-        .flatten()
-    })
-}
-
-pub fn finish_qr_pairing(
-    runner: &dyn AdbRunner,
-    secret: &QrPairingSecret,
-) -> Result<Option<QrPairingResult>, DeviceError> {
-    if OffsetDateTime::now_utc() >= secret.expires_at {
-        return Err(DeviceError::Adb("QR pairing request expired".into()));
-    }
-    let services = runner.run(&["mdns", "services"])?;
-    let Some(endpoint) = parse_mdns_pairing_endpoint(&services, &secret.service_name) else {
-        return Ok(None);
-    };
-    let output = runner.run(&["pair", &endpoint, &secret.password])?;
-    if !output.to_ascii_lowercase().contains("successfully paired") {
-        return Err(DeviceError::Adb(output.trim().to_owned()));
-    }
-    Ok(Some(QrPairingResult {
-        endpoint,
-        adb_output: output.trim().to_owned(),
-    }))
 }
 
 pub fn configure_proxy_command(serial: &str, host: &str, port: u16) -> Vec<String> {
@@ -290,6 +75,126 @@ pub fn clear_proxy(runner: &dyn AdbRunner, serial: &str) -> Result<(), DeviceErr
     let args = clear_proxy_command(serial);
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     runner.run(&refs).map(|_| ())
+}
+
+pub fn package_installed(
+    runner: &dyn AdbRunner,
+    serial: &str,
+    package_name: &str,
+) -> Result<bool, DeviceError> {
+    validate_package_name(package_name)?;
+    let output = runner.run(&["-s", serial, "shell", "pm", "path", package_name])?;
+    Ok(output
+        .lines()
+        .any(|line| line.trim().starts_with("package:")))
+}
+
+pub fn package_version_code(
+    runner: &dyn AdbRunner,
+    serial: &str,
+    package_name: &str,
+) -> Result<Option<u64>, DeviceError> {
+    validate_package_name(package_name)?;
+    let output = runner.run(&["-s", serial, "shell", "dumpsys", "package", package_name])?;
+    Ok(crate::parse_package_version(&output).1)
+}
+
+pub fn configure_usb_relay(
+    runner: &dyn AdbRunner,
+    serial: &str,
+    port: u16,
+) -> Result<(), DeviceError> {
+    runner
+        .run(&[
+            "-s",
+            serial,
+            "reverse",
+            &format!("tcp:{port}"),
+            &format!("tcp:{port}"),
+        ])
+        .map(|_| ())
+}
+
+pub fn remove_usb_relay(
+    runner: &dyn AdbRunner,
+    serial: &str,
+    port: u16,
+) -> Result<(), DeviceError> {
+    runner
+        .run(&["-s", serial, "reverse", "--remove", &format!("tcp:{port}")])
+        .map(|_| ())
+}
+
+pub fn launch_usb_companion(
+    runner: &dyn AdbRunner,
+    serial: &str,
+    companion_package: &str,
+    target_package: Option<&str>,
+    port: u16,
+    ca_pem: &str,
+) -> Result<(), DeviceError> {
+    validate_package_name(companion_package)?;
+    if let Some(target_package) = target_package {
+        validate_package_name(target_package)?;
+    }
+    let component = format!("{companion_package}/.UsbCaptureActivity");
+    let port = port.to_string();
+    let ca_base64 = STANDARD.encode(ca_pem);
+    let mut args = vec![
+        "-s",
+        serial,
+        "shell",
+        "am",
+        "start",
+        "-W",
+        "-n",
+        &component,
+        "--es",
+        "app_tester_ca_base64",
+        &ca_base64,
+    ];
+    if let Some(target_package) = target_package {
+        args.extend([
+            "--es",
+            "app_tester_host",
+            "127.0.0.1",
+            "--ei",
+            "app_tester_port",
+            &port,
+            "--es",
+            "app_tester_package",
+            target_package,
+            "--ez",
+            "app_tester_start_capture",
+            "true",
+        ]);
+    }
+    let output = runner.run(&args)?;
+    if output.lines().any(|line| line.trim().starts_with("Error:")) {
+        return Err(DeviceError::Adb(output.trim().to_owned()));
+    }
+    Ok(())
+}
+
+pub fn companion_vpn_active(
+    runner: &dyn AdbRunner,
+    serial: &str,
+    companion_package: &str,
+) -> Result<bool, DeviceError> {
+    validate_package_name(companion_package)?;
+    let output = runner.run(&["-s", serial, "shell", "dumpsys", "connectivity"])?;
+    Ok(output.contains(&format!("VPN:{companion_package}")))
+}
+
+fn validate_package_name(package_name: &str) -> Result<(), DeviceError> {
+    let valid = !package_name.is_empty()
+        && package_name.contains('.')
+        && package_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_'));
+    valid
+        .then_some(())
+        .ok_or_else(|| DeviceError::Adb("invalid Android package name".into()))
 }
 pub fn verify_proxy(runner: &dyn AdbRunner, serial: &str) -> Result<String, DeviceError> {
     runner
@@ -361,6 +266,30 @@ fn parse_app_uid(package_dump: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    struct RecordingRunner {
+        commands: Mutex<Vec<Vec<String>>>,
+        package_path: &'static str,
+    }
+
+    impl AdbRunner for RecordingRunner {
+        fn run(&self, args: &[&str]) -> Result<String, DeviceError> {
+            self.commands
+                .lock()
+                .unwrap()
+                .push(args.iter().map(|arg| (*arg).to_owned()).collect());
+            if args.get(3..5) == Some(&["pm", "path"]) {
+                Ok(self.package_path.into())
+            } else {
+                Ok("Starting: Intent".into())
+            }
+        }
+
+        fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
+            unreachable!("USB relay does not transfer files")
+        }
+    }
     #[test]
     fn constructs_proxy_commands_without_shell_interpolation() {
         assert_eq!(
@@ -373,23 +302,96 @@ mod tests {
     }
 
     #[test]
-    fn generates_android_adb_qr_payload() {
-        let (challenge, secret) = create_qr_pairing().unwrap();
-        assert!(
-            challenge
-                .qr_payload
-                .starts_with("WIFI:T:ADB;S:studio-app-tester-")
-        );
-        assert!(challenge.qr_payload.ends_with(";;"));
-        assert_eq!(challenge.id, secret.id);
-        assert!(challenge.qr_svg.contains("<svg"));
-        assert!(!challenge.qr_svg.contains(&secret.password));
+    fn detects_installed_companion_package() {
+        let runner = RecordingRunner {
+            commands: Mutex::new(Vec::new()),
+            package_path: "package:/data/app/dev.prayag.apptester.companion/base.apk\n",
+        };
+        assert!(package_installed(&runner, "phone", "dev.prayag.apptester.companion").unwrap());
     }
 
     #[test]
-    fn validates_companion_connection_values() {
-        assert!(validate_companion_connection("192.168.1.12").is_ok());
-        assert!(validate_companion_connection("host/path").is_err());
+    fn reads_companion_version_code() {
+        struct VersionRunner;
+        impl AdbRunner for VersionRunner {
+            fn run(&self, _: &[&str]) -> Result<String, DeviceError> {
+                Ok("versionCode=9 minSdk=26 targetSdk=36\nversionName=0.3.2".into())
+            }
+            fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
+                unreachable!()
+            }
+        }
+        assert_eq!(
+            package_version_code(&VersionRunner, "phone", "dev.prayag.apptester.companion")
+                .unwrap(),
+            Some(9)
+        );
+    }
+
+    #[test]
+    fn detects_established_companion_vpn_from_connectivity_dump() {
+        struct ConnectivityRunner;
+        impl AdbRunner for ConnectivityRunner {
+            fn run(&self, _: &[&str]) -> Result<String, DeviceError> {
+                Ok("ni{VPN CONNECTED extra: VPN:dev.prayag.apptester.companion} Uids: <{10742-10742}>".into())
+            }
+            fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
+                unreachable!()
+            }
+        }
+        assert!(
+            companion_vpn_active(
+                &ConnectivityRunner,
+                "phone",
+                "dev.prayag.apptester.companion"
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn configures_and_removes_usb_reverse_relay() {
+        let runner = RecordingRunner {
+            commands: Mutex::new(Vec::new()),
+            package_path: "",
+        };
+        configure_usb_relay(&runner, "phone", 8080).unwrap();
+        remove_usb_relay(&runner, "phone", 8080).unwrap();
+        assert_eq!(
+            *runner.commands.lock().unwrap(),
+            vec![
+                vec!["-s", "phone", "reverse", "tcp:8080", "tcp:8080"],
+                vec!["-s", "phone", "reverse", "--remove", "tcp:8080"],
+            ]
+        );
+    }
+
+    #[test]
+    fn launches_companion_with_fixed_usb_endpoint() {
+        let runner = RecordingRunner {
+            commands: Mutex::new(Vec::new()),
+            package_path: "",
+        };
+        launch_usb_companion(
+            &runner,
+            "phone",
+            "dev.prayag.apptester.companion",
+            Some("com.example.debug"),
+            8080,
+            "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----",
+        )
+        .unwrap();
+        let command = runner.commands.lock().unwrap().pop().unwrap();
+        assert!(
+            command
+                .windows(2)
+                .any(|args| args == ["app_tester_host", "127.0.0.1"])
+        );
+        assert!(
+            command
+                .windows(2)
+                .any(|args| args == ["app_tester_package", "com.example.debug"])
+        );
     }
 
     #[test]
@@ -405,100 +407,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_only_matching_pairing_service() {
-        let output = "List of discovered mdns services\n\
-studio-other _adb-tls-pairing._tcp 192.168.1.2:4000\n\
-studio-app-tester-123 _adb-tls-pairing._tcp 192.168.1.4:42891\n";
-        assert_eq!(
-            parse_mdns_pairing_endpoint(output, "studio-app-tester-123").as_deref(),
-            Some("192.168.1.4:42891")
-        );
-    }
-
-    #[test]
-    fn parses_the_usb_device_wifi_address() {
-        assert_eq!(
-            parse_wifi_ipv4(
-                "default via 192.168.1.1 dev wlan0 proto dhcp src 192.168.1.44 metric 600"
-            ),
-            Some("192.168.1.44".into())
-        );
-        assert_eq!(parse_wifi_ipv4("unreachable 127.0.0.0/8"), None);
-    }
-
-    #[test]
-    fn resolves_the_wifi_address_before_switching_adb_off_usb() {
-        use std::sync::Mutex;
-
-        struct RecordingRunner {
-            commands: Mutex<Vec<Vec<String>>>,
-        }
-        impl AdbRunner for RecordingRunner {
-            fn run(&self, args: &[&str]) -> Result<String, DeviceError> {
-                self.commands
-                    .lock()
-                    .unwrap()
-                    .push(args.iter().map(|arg| (*arg).to_owned()).collect());
-                if args.ends_with(&["shell", "ip", "route"]) {
-                    Ok("10.10.10.0/24 dev wlan0 proto kernel scope link src 10.10.10.19".into())
-                } else {
-                    Ok("connected to 10.10.10.19:5555".into())
-                }
-            }
-            fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
-                unreachable!("USB-to-Wi-Fi does not transfer a file")
-            }
-        }
-
-        let runner = RecordingRunner {
-            commands: Mutex::new(Vec::new()),
-        };
-        let result = enable_usb_wifi(&runner, "JFR8T8YDFI9955MB", 5555).unwrap();
-
-        assert_eq!(result.endpoint, "10.10.10.19:5555");
-        assert_eq!(
-            *runner.commands.lock().unwrap(),
-            vec![
-                vec!["-s", "JFR8T8YDFI9955MB", "shell", "ip", "route"],
-                vec!["-s", "JFR8T8YDFI9955MB", "tcpip", "5555"],
-                vec!["connect", "10.10.10.19:5555"],
-            ]
-        );
-    }
-
-    #[test]
-    fn verifies_that_the_wifi_adb_port_is_reachable() {
-        use std::net::TcpListener;
-        use std::time::Duration;
-
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        verify_adb_wifi_endpoint(
-            &listener.local_addr().unwrap().to_string(),
-            Duration::from_secs(1),
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn rejects_invalid_manual_pairing_values() {
-        struct Unused;
-        impl AdbRunner for Unused {
-            fn run(&self, _: &[&str]) -> Result<String, DeviceError> {
-                panic!("validation should run before ADB")
-            }
-            fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
-                panic!("validation should run before ADB")
-            }
-        }
-        let runner = Unused;
-        assert!(pair_with_code(&runner, "host;bad", 37123, "123456").is_err());
-        assert!(pair_with_code(&runner, "192.168.1.5", 0, "123456").is_err());
-        assert!(pair_with_code(&runner, "192.168.1.5", 37123, "abcdef").is_err());
-    }
-
-    #[test]
     fn targets_certificate_transfer_to_the_selected_serial() {
         use std::sync::Mutex;
+        use uuid::Uuid;
         struct RecordingRunner {
             pushed_serial: Mutex<Option<String>>,
         }
