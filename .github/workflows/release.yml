@@ -9,6 +9,24 @@ permissions:
   contents: write
 
 jobs:
+  android:
+    name: Android Companion
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify signed companion APK
+        run: |
+          test -s apps/companion/releases/app-tester-companion.apk
+          sha256sum -c apps/companion/releases/app-tester-companion.apk.sha256
+          unzip -t apps/companion/releases/app-tester-companion.apk
+      - name: Publish Android downloads
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            apps/companion/releases/app-tester-companion.apk
+            apps/companion/releases/app-tester-companion.apk.sha256
+          generate_release_notes: true
+
   desktop:
     name: Desktop (${{ matrix.name }})
     strategy:
@@ -66,7 +84,7 @@ jobs:
           tauriScript: pnpm tauri
           tagName: v__VERSION__
           releaseName: App Tester v__VERSION__
-          releaseBody: Installers for macOS (Apple Silicon and Intel), Windows, and Linux. App Tester is local-first and sends no telemetry.
+          releaseBody: Installers for macOS (Apple Silicon and Intel), Windows, Linux, and the Android companion APK. App Tester is local-first and sends no telemetry.
           releaseDraft: false
           prerelease: false
           generateReleaseNotes: true

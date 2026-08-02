@@ -64,7 +64,7 @@ open class MainActivity : FlutterActivity() {
         val host = intent.getStringExtra(EXTRA_HOST) ?: return
         val port = intent.getIntExtra(EXTRA_PORT, 0)
         val targetPackage = intent.getStringExtra(EXTRA_PACKAGE) ?: return
-        if (host != USB_HOST || port != USB_PORT) {
+        if (host != USB_HOST || port !in 1..65535) {
             controller.stopVpn("Invalid USB relay configuration. Direct networking is unchanged.")
             return
         }
@@ -101,7 +101,6 @@ open class MainActivity : FlutterActivity() {
     private companion object {
         const val VPN_CONSENT_REQUEST = 4401
         const val USB_HOST = "127.0.0.1"
-        const val USB_PORT = 8080
         const val EXTRA_HOST = "app_tester_host"
         const val EXTRA_PORT = "app_tester_port"
         const val EXTRA_PACKAGE = "app_tester_package"

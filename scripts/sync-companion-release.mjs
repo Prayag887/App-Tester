@@ -1,4 +1,5 @@
-import { copyFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,3 +10,5 @@ const destination = resolve(root, "apps/companion/releases/app-tester-companion.
 
 mkdirSync(dirname(destination), { recursive: true });
 copyFileSync(source, destination);
+const checksum = createHash("sha256").update(readFileSync(destination)).digest("hex");
+writeFileSync(`${destination}.sha256`, `${checksum}  apps/companion/releases/app-tester-companion.apk\n`);

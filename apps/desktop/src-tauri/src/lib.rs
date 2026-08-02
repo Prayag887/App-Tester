@@ -48,8 +48,7 @@ struct AndroidCaChange {
 }
 
 const COMPANION_PACKAGE: &str = "dev.prayag.apptester.companion";
-const MINIMUM_COMPANION_VERSION_CODE: u64 = 9;
-const PROXY_PORT: u16 = 8080;
+const MINIMUM_COMPANION_VERSION_CODE: u64 = 11;
 
 #[derive(Debug, Serialize)]
 struct CompanionStatus {
@@ -188,6 +187,10 @@ async fn open_companion(
     }
     let ca_pem = std::fs::read_to_string(&certificate_path)
         .map_err(|error| format!("could not read App Tester CA: {error}"))?;
+    let proxy_port = state.proxy.configuration().port;
+    if package_name.is_some() && proxy_port == 0 {
+        return Err("start the capture proxy before opening the companion".into());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
         authorized_usb(&adb, &serial)?;
@@ -204,7 +207,7 @@ async fn open_companion(
         .map_err(|error| error.to_string())?;
         let package_name = package_name.filter(|package| !package.trim().is_empty());
         if package_name.is_some() {
-            android::configure_usb_relay(&adb, &serial, PROXY_PORT)
+            android::configure_usb_relay(&adb, &serial, proxy_port)
                 .map_err(|error| error.to_string())?;
         }
         android::launch_usb_companion(
@@ -212,7 +215,7 @@ async fn open_companion(
             &serial,
             COMPANION_PACKAGE,
             package_name.as_deref(),
-            PROXY_PORT,
+            proxy_port,
             &ca_pem,
         )
         .map_err(|error| error.to_string())?;
@@ -234,10 +237,17 @@ async fn open_companion(
 }
 
 #[tauri::command]
-async fn remove_usb_relay(serial: String) -> Result<(), String> {
+async fn remove_usb_relay(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+) -> Result<(), String> {
+    let proxy_port = state.proxy.configuration().port;
+    if proxy_port == 0 {
+        return Ok(());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
-        android::remove_usb_relay(&adb, &serial, PROXY_PORT).map_err(|error| error.to_string())
+        android::remove_usb_relay(&adb, &serial, proxy_port).map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| format!("USB relay cleanup task failed: {error}"))?
@@ -974,7 +984,7 @@ pub fn run() {
             let proxy = Arc::new(ProxyService::new(
                 ProxyConfiguration {
                     bind_address: "0.0.0.0".into(),
-                    port: 8080,
+                    port: 0,
                     ca_certificate_path: ca_directory.join("app-tester-ca.pem"),
                     ca_fingerprint_sha256: None,
                 },

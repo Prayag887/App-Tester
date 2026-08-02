@@ -30,5 +30,6 @@ dashmap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
+wait-timeout.workspace = true
 
 [dev-dependencies]

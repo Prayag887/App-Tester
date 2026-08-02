@@ -18,8 +18,14 @@ class CaptureVpnService : VpnService() {
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private var failures = 0
     private var monitoringStarted = false
+    private var stopped = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            stopCapture()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val host = intent?.getStringExtra(EXTRA_HOST) ?: return START_NOT_STICKY
         val port = intent.getIntExtra(EXTRA_PORT, 0)
         val packageName = intent.getStringExtra(EXTRA_PACKAGE) ?: return START_NOT_STICKY
@@ -59,11 +65,7 @@ class CaptureVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        scheduler.shutdownNow()
-        runCatching { VpnNative.stop() }
-        tun?.close()
-        tun = null
-        ProxySafetyController(this).stopVpn("VPN capture stopped. Direct networking resumed.")
+        stopCapture()
         super.onDestroy()
     }
 
@@ -84,6 +86,17 @@ class CaptureVpnService : VpnService() {
         }
     }
 
+    private fun stopCapture() {
+        if (stopped) return
+        stopped = true
+        scheduler.shutdownNow()
+        runCatching { VpnNative.stop() }
+        tun?.close()
+        tun = null
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        ProxySafetyController(this).markVpnStopped()
+    }
+
     private fun notification(packageName: String): android.app.Notification {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "App Tester capture", NotificationManager.IMPORTANCE_LOW),
@@ -100,6 +113,7 @@ class CaptureVpnService : VpnService() {
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
         const val EXTRA_PACKAGE = "package"
+        const val ACTION_STOP = "dev.prayag.apptester.companion.STOP_VPN"
         private const val CHANNEL_ID = "capture_vpn"
         private const val NOTIFICATION_ID = 22
         private const val MTU = 1500

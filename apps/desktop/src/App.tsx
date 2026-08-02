@@ -150,10 +150,13 @@ export function App() {
   const importInput = useRef<HTMLInputElement>(null);
   const appRequest = useRef(0);
   const companionRequest = useRef(0);
+  const deviceRefreshPending = useRef(false);
 
   useEffect(() => {
     void api.getProxyStatus().then(setProxy);
     const refreshDevices = () => {
+      if (deviceRefreshPending.current) return;
+      deviceRefreshPending.current = true;
       void api.discoverDevices().then(items => {
         const usbDevices = items.filter(item => item.connection_type === "usb");
         setDevices(usbDevices);
@@ -166,7 +169,8 @@ export function App() {
           void api.stopProxy();
           setNotice("USB disconnected. Capture stopped and phone traffic returned to direct networking.");
         }
-      }).catch(error => setNotice(`Could not refresh Android devices: ${String(error)}`));
+      }).catch(error => setNotice(`Could not refresh Android devices: ${String(error)}`))
+        .finally(() => { deviceRefreshPending.current = false; });
     };
     refreshDevices();
     const deviceTimer = window.setInterval(refreshDevices, 2000);
