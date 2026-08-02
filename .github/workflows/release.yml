@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           test -s apps/companion/releases/app-tester-companion.apk
-          sha256sum -c apps/companion/releases/app-tester-companion.apk.sha256
+          tr -d '\r' < apps/companion/releases/app-tester-companion.apk.sha256 | sha256sum -c -
           unzip -t apps/companion/releases/app-tester-companion.apk
           unzip -Z1 apps/companion/releases/app-tester-companion.apk | grep -q '^lib/arm64-v8a/libapptester_tun2socks.so$'
           unzip -Z1 apps/companion/releases/app-tester-companion.apk | grep -q '^lib/x86_64/libapptester_tun2socks.so$'
