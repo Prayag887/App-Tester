@@ -102,12 +102,29 @@ class ProxySafetyScreen extends StatelessWidget {
                         const SizedBox(height: 20),
                         FilledButton.icon(
                           onPressed: viewModel.isWorking ||
+                                  active ||
+                                  viewModel.status?.host == null ||
+                                  packageName == null
+                              ? null
+                              : viewModel.connect,
+                          icon: Icon(active
+                              ? Icons.desktop_windows_rounded
+                              : Icons.cable_rounded),
+                          label: Text(active
+                              ? 'Connected to desktop'
+                              : 'Connect to desktop'),
+                          style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(56)),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: viewModel.isWorking ||
                                   viewModel.status?.caAvailable != true
                               ? null
                               : viewModel.installCa,
                           icon: const Icon(Icons.verified_user_outlined),
                           label: const Text('Install HTTPS CA'),
-                          style: FilledButton.styleFrom(
+                          style: OutlinedButton.styleFrom(
                               minimumSize: const Size.fromHeight(52)),
                         ),
                         const SizedBox(height: 12),

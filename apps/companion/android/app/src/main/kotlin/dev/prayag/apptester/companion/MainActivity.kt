@@ -27,6 +27,7 @@ open class MainActivity : FlutterActivity() {
                 try {
                     val status = when (call.method) {
                         "status" -> controller.status()
+                        "startVpn" -> connectDesktop()
                         "stopVpn" -> controller.stopVpn()
                         "installCa" -> {
                             openCaInstaller()
@@ -68,12 +69,17 @@ open class MainActivity : FlutterActivity() {
             return
         }
         controller.configureVpn(host, port, targetPackage)
+        connectDesktop()
+    }
+
+    private fun connectDesktop(): ProxySafetyStatus {
         val consent = VpnService.prepare(this)
         if (consent != null) {
             waitingForVpnConsent = true
             startActivityForResult(consent, VPN_CONSENT_REQUEST)
+            return controller.status("Approve Android's VPN consent to connect to App Tester desktop.")
         } else {
-            controller.startVpn()
+            return controller.startVpn()
         }
     }
 

@@ -47,6 +47,7 @@ class CompanionLogEntry {
 
 abstract interface class ProxySafetyRepository {
   Future<ProxySafetyStatus> status();
+  Future<ProxySafetyStatus> startVpn();
   Future<ProxySafetyStatus> stopVpn();
   Future<ProxySafetyStatus> installCa();
   Future<ProxySafetyStatus> removeCa();

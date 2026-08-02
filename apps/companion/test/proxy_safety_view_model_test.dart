@@ -6,9 +6,16 @@ class FakeRepository implements ProxySafetyRepository {
   ProxySafetyStatus current = const ProxySafetyStatus(
       isMonitoring: false, isVpnActive: false, caAvailable: false);
   int stopCalls = 0;
+  int startCalls = 0;
 
   @override
   Future<ProxySafetyStatus> status() async => current;
+
+  @override
+  Future<ProxySafetyStatus> startVpn() async {
+    startCalls += 1;
+    return current;
+  }
 
   @override
   Future<ProxySafetyStatus> installCa() async => current;
@@ -57,6 +64,16 @@ void main() {
     expect(repository.stopCalls, 1);
     expect(model.status?.isVpnActive, isFalse);
     expect(model.status?.message, contains('Direct networking'));
+    model.dispose();
+  });
+
+  test('connects configured capture to desktop', () async {
+    final repository = FakeRepository();
+    final model = ProxySafetyViewModel(repository);
+
+    await model.connect();
+
+    expect(repository.startCalls, 1);
     model.dispose();
   });
 }

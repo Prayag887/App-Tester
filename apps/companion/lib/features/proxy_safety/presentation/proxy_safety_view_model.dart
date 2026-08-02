@@ -24,6 +24,8 @@ class ProxySafetyViewModel extends ChangeNotifier {
 
   Future<void> disconnect() => _run(_repository.stopVpn);
 
+  Future<void> connect() => _run(_repository.startVpn);
+
   Future<void> installCa() => _run(_repository.installCa);
 
   Future<void> removeCa() => _run(_repository.removeCa);
