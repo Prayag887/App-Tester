@@ -9,12 +9,9 @@ plugins {
 val signingProperties = Properties()
 val signingPropertiesFile = rootProject.file("signing.properties")
 
-if (!signingPropertiesFile.isFile) {
-    throw GradleException(
-        "Missing Android release signing configuration. Create android/signing.properties from the documented template before building a release APK.",
-    )
+if (signingPropertiesFile.isFile) {
+    signingPropertiesFile.inputStream().use(signingProperties::load)
 }
-signingPropertiesFile.inputStream().use(signingProperties::load)
 
 android {
     namespace = "dev.prayag.apptester.companion"
@@ -42,12 +39,24 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.create("release") {
-                storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
-                storePassword = signingProperties.getProperty("storePassword")
-                keyAlias = signingProperties.getProperty("keyAlias")
-                keyPassword = signingProperties.getProperty("keyPassword")
+            if (signingPropertiesFile.isFile) {
+                signingConfig = signingConfigs.create("release") {
+                    storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
+                    storePassword = signingProperties.getProperty("storePassword")
+                    keyAlias = signingProperties.getProperty("keyAlias")
+                    keyPassword = signingProperties.getProperty("keyPassword")
+                }
             }
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name.contains("Release", ignoreCase = true) && !signingPropertiesFile.isFile) {
+        doFirst {
+            throw GradleException(
+                "Missing Android release signing configuration. Create android/signing.properties from the documented template before building a release APK.",
+            )
         }
     }
 }

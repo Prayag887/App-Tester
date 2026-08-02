@@ -73,6 +73,20 @@ pub fn parse_logcat_epoch_line(line: &str) -> Option<FocusedLogLine> {
     })
 }
 
+/// Redacts authentication and analytics values before Logcat reaches storage or exports.
+pub fn redact_log_message(message: &str) -> String {
+    let jwt =
+        Regex::new(r"\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}\b").expect("valid JWT pattern");
+    let sensitive_value = Regex::new(
+        r#"(?i)(\"?(?:authorization|access[_-]?token|refresh[_-]?token|firebase(?:authentication|installation)?id|sessionid|session_id|token|mobile_no|username)\"?\s*[:=]\s*\"?)([^\",\s}]+)"#,
+    )
+    .expect("valid sensitive log value pattern");
+    let without_jwts = jwt.replace_all(message, "[REDACTED_JWT]");
+    sensitive_value
+        .replace_all(&without_jwts, "${1}[REDACTED]")
+        .into_owned()
+}
+
 pub fn classify(message: &str) -> Option<(IncidentCategory, &'static str)> {
     let lower = message.to_ascii_lowercase();
     if lower.contains("trust anchor for certification path not found")

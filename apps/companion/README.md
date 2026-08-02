@@ -27,6 +27,7 @@ flutter build apk --release
 ```
 
 Release signing remains required. Create the ignored `android/signing.properties` locally with the keystore values described by the Android build error.
+Debug builds do not require a release key; CI uses one only to verify the companion can be built and bundled. Tagged release builds continue to require the managed release key.
 
 ## Structure
 

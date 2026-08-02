@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Activity, AlertCircle, CalendarDays, ChevronDown, Circle, Copy, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, X } from "lucide-react";
+import { Activity, AlertCircle, CalendarDays, ChevronDown, Circle, Copy, Download, Filter, ListTree, Pause, Play, Search, Settings, ShieldCheck, SlidersHorizontal, Square, TerminalSquare, Trash2, Upload, X } from "lucide-react";
 import * as api from "./api";
 import type { AndroidApp, AndroidCaStatus, AndroidCertificateInstall, AndroidDevice, BodyStorage, CompanionStatus, HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
@@ -80,6 +80,11 @@ export const isInterceptionTlsNoise = (incident: LogIncident) => {
   const evidence = `${incident.title}\n${incident.summary}\n${incident.root_cause ?? ""}\n${incident.lines.map(line => line.message).join("\n")}`.toLowerCase();
   return evidence.includes("trust anchor for certification path not found") || evidence.includes("certpathvalidatorexception");
 };
+export const redactLogMessage = (message:string) => message
+  .replace(/\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}\b/g, "[REDACTED_JWT]")
+  .replace(/("?(?:authorization|access[_-]?token|refresh[_-]?token|firebase(?:authentication|installation)?id|sessionid|session_id|token|mobile_no|username)"?\s*[:=]\s*"?)([^",\s}]+)/gi, "$1[REDACTED]");
+export const logEvidence = (lines:LogIncident["lines"]) =>
+  lines.map(line=>`${line.level} ${line.tag}: ${redactLogMessage(line.message)}`).join("\n");
 export const developerIncidentReport = (incident:LogIncident, packageName:string) => `# ${incident.title}
 
 Package: ${packageName || "unknown"}
@@ -103,7 +108,7 @@ ${incident.reproduction_steps.map((step,index)=>`${index+1}. ${step}`).join("\n"
 
 ## Evidence
 \`\`\`
-${incident.lines.map(line=>`${line.level} ${line.tag}: ${line.message}`).join("\n")}
+${logEvidence(incident.lines)}
 \`\`\``;
 const jsonView = (value: string) => {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
@@ -142,6 +147,7 @@ export function App() {
   const hiddenTransactionIds = useRef(new Set<string>());
   const activeSessionId = useRef<string | undefined>(undefined);
   const activeCaptureDevice = useRef<string | undefined>(undefined);
+  const importInput = useRef<HTMLInputElement>(null);
   const appRequest = useRef(0);
   const companionRequest = useRef(0);
 
@@ -387,6 +393,26 @@ export function App() {
     setTransactions([]); setSelectedId(undefined); setIncidents([]);
     setNotice("Cleared the API list from this UI session. Saved history remains available for comparisons and returns after restart.");
   }
+  async function exportCurrentCapture() {
+    try {
+      const path = await api.exportCaptureToFile();
+      setNotice(`Exported redacted capture metadata to ${path}. Bodies and cURL are omitted.`);
+    } catch (error) {
+      if (!String(error).includes("export canceled")) setNotice(`Could not export capture: ${String(error)}`);
+    }
+  }
+  async function importPortableCapture(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) { setNotice("Capture import must be 25 MiB or smaller."); return; }
+    try {
+      const count = await api.importCapture(await file.text());
+      setTransactions(await api.listTransactions());
+      setSelectedId(undefined); setIncidents([]);
+      setNotice(`Imported ${count} redacted transaction${count === 1 ? "" : "s"}.`);
+    } catch (error) { setNotice(`Could not import capture: ${String(error)}`); }
+  }
   async function testYesterday() {
     if (!window.confirm("Replay every testable API captured yesterday? Requests may include state-changing methods. Requests containing redacted credentials or data are skipped.")) return;
     setConnecting(true);
@@ -475,6 +501,9 @@ export function App() {
       <button className={changedOnly?"active":""} onClick={()=>setChangedOnly(v=>!v)}><Filter/>Changed only</button>
       <button className={errorsOnly?"active":""} onClick={()=>setErrorsOnly(v=>!v)}><AlertCircle/>Errors only</button>
       <button title="Showing today’s captures"><CalendarDays/>Today</button>
+      <button disabled={!transactions.length} onClick={()=>void exportCurrentCapture()}><Download/>Export redacted</button>
+      <input ref={importInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={event=>void importPortableCapture(event)}/>
+      <button onClick={()=>importInput.current?.click()}><Upload/>Import capture</button>
       <button className="danger" title="Clear this UI session without deleting saved comparison history"
         onClick={deleteAll}><Trash2/>Delete all</button>
       {capturing ? <><button onClick={()=>setPaused(v=>!v)}>{paused?<Play/>:<Pause/>}{paused?"Resume capture":"Pause capture"}</button>
@@ -611,8 +640,8 @@ function LogInspector({incidents, packageName, capturing, onStart}:{
             <h3>Likely cause</h3><p>{incident.likely_cause}</p>
             <h3>How to reproduce</h3><ol>{incident.reproduction_steps.map((step,index)=><li key={index}>{step}</li>)}</ol>
             <button onClick={()=>void navigator.clipboard.writeText(developerIncidentReport(incident, packageName))}><Copy/>Copy developer report</button></div>
-          <div className="captured-lines"><h3>{incident.lines.length} captured log {incident.lines.length === 1 ? "line" : "lines"}</h3>
-            {incident.lines.map((line,index)=><pre key={index}>{line.level} {line.tag}: {line.message}</pre>)}</div>
+          <details><summary>View {incident.lines.length} captured log {incident.lines.length === 1 ? "line" : "lines"}</summary>
+            <div className="log-evidence"><button onClick={()=>void navigator.clipboard.writeText(logEvidence(incident.lines))}><Copy/>Copy redacted evidence</button><pre>{logEvidence(incident.lines)}</pre></div></details>
         </div>
       </details>)}
       {!visibleIncidents.length && <div className="empty log-empty"><ShieldCheck/><strong>No app issues detected</strong>

@@ -1,0 +1,26 @@
+name: Bug report
+description: Report a reproducible App Tester problem
+body:
+  - type: markdown
+    attributes:
+      value: Never include credentials, certificate keys, device identifiers, or unredacted traffic.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: 1. ...\n2. ...\n3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: App Tester version, desktop OS, Android version, connection type, and sanitized logs.
+    validations:
+      required: true

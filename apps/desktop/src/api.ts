@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CompanionStatus, HttpTransaction, ProxyStatus, ReplaySummary } from "./types";
+import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, ComparisonRules, CompanionStatus, HttpTransaction, ProxyStatus, ReplaySummary } from "./types";
 const native = () => "__TAURI_INTERNALS__" in window;
 export const discoverDevices = async (): Promise<AndroidDevice[]> => native() ? invoke("discover_devices") : [];
 export const listInstalledApps = async (serial: string): Promise<AndroidApp[]> => invoke("list_installed_apps", { serial });
@@ -30,7 +30,13 @@ export const listTransactions = async ():Promise<HttpTransaction[]> => native()
   ? collectTransactionPages((limit, offset) => invoke("list_transactions", {limit, offset}))
   : [];
 export const deleteAllTransactions = async ():Promise<void> => invoke("delete_all_transactions");
+export const exportCaptureToFile = async ():Promise<string> => invoke("export_capture_to_file");
+export const importCapture = async (payload:string):Promise<number> => invoke("import_capture", {payload});
 export const testYesterdaysApis = async ():Promise<ReplaySummary> => invoke("test_yesterdays_apis");
+export const deleteBaseline = async (endpointId:string):Promise<boolean> => invoke("delete_baseline", {endpointId});
+export const getComparisonRules = async (endpointId:string):Promise<ComparisonRules> => invoke("get_comparison_rules", {endpointId});
+export const saveComparisonRules = async (endpointId:string, rules:ComparisonRules):Promise<void> =>
+  invoke("save_comparison_rules", {endpointId, ignoredJsonPointers:rules.ignored_json_pointers, volatileKeys:rules.volatile_keys});
 export const getCompanionStatus = async (serial:string):Promise<CompanionStatus> =>
   invoke("get_companion_status", { serial });
 export const installCompanion = async (serial:string):Promise<CompanionStatus> =>

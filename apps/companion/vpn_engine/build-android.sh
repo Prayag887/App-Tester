@@ -5,7 +5,17 @@ engine_root="$(cd "$(dirname "$0")" && pwd)"
 app_root="$(cd "$engine_root/.." && pwd)"
 ndk_root="${ANDROID_NDK_HOME:-$HOME/Library/Android/sdk/ndk/28.2.13676358}"
 prebuilt_root="$ndk_root/toolchains/llvm/prebuilt"
-toolchain="$(find "$prebuilt_root" -maxdepth 1 -mindepth 1 -type d -name 'darwin-*' | head -n 1)/bin"
+
+case "$(uname -s)" in
+  Darwin) host_toolchain='darwin-*' ;;
+  Linux) host_toolchain='linux-*' ;;
+  *)
+    echo "Unsupported host for Android NDK build: $(uname -s)" >&2
+    exit 1
+    ;;
+esac
+
+toolchain="$(find "$prebuilt_root" -maxdepth 1 -mindepth 1 -type d -name "$host_toolchain" | head -n 1)/bin"
 
 if [[ ! -x "$toolchain/aarch64-linux-android26-clang" ]]; then
   echo "A compatible Android NDK is required. Set ANDROID_NDK_HOME to its root." >&2

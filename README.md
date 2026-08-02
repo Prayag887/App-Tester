@@ -31,6 +31,10 @@ pnpm --dir apps/desktop tauri dev
 
 For a production-style local bundle, run `pnpm build`. It builds the companion APK first, then includes it in the desktop application.
 
+Before a release, run `pnpm qa:production` and complete the [production
+readiness checklist](docs/production-readiness.md) and the public
+[launch-readiness checklist](docs/launch-readiness.md).
+
 See [proxy setup](docs/proxy-setup.md), [Android certificate setup](docs/android-certificate-setup.md), and [known limitations](docs/known-limitations.md) before capturing HTTPS traffic.
 
 The optional Android companion has its own [setup and validation guide](apps/companion/README.md). It is a standard Android app and does not require device-owner enrollment.

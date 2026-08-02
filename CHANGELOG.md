@@ -8,12 +8,15 @@
 - Companion-managed HTTPS CA setup/removal guidance and immediate direct-network recovery.
 - Searchable debug-package picker that opens the selected Android application.
 - Specific DNS, timeout, connection, DTO, database, memory, and framework log summaries.
+- Safe capture import/export with redacted metadata and replay safeguards.
 
 ### Changed
 
 - Android capture now uses per-app VPN traffic through `adb reverse` instead of a global device proxy.
 - USB loss stops interception on the phone within one failed relay health check.
 - Desktop releases embed one signed companion APK across macOS, Windows, and Linux builds.
+- Log incidents use one compact, expandable, copyable, redacted evidence block.
+- Logcat capture reconnects after transient ADB transport failures.
 
 ### Removed
 
