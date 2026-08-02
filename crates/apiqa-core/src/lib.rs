@@ -6,7 +6,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 use thiserror::Error;
+use wait_timeout::ChildExt;
 
 pub mod android;
 pub mod comparison;
@@ -97,13 +99,28 @@ impl ProcessAdb {
 
 impl AdbRunner for ProcessAdb {
     fn run(&self, args: &[&str]) -> Result<String, DeviceError> {
-        let output = Command::new(&self.path)
+        let mut child = Command::new(&self.path)
             .args(args)
-            .output()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .map_err(|error| DeviceError::Start {
                 path: self.path.clone(),
                 message: error.to_string(),
             })?;
+        let status = child
+            .wait_timeout(Duration::from_secs(ADB_COMMAND_TIMEOUT_SECONDS))
+            .map_err(|error| DeviceError::Adb(error.to_string()))?;
+        if status.is_none() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(DeviceError::Adb(format!(
+                "command timed out after {ADB_COMMAND_TIMEOUT_SECONDS} seconds"
+            )));
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|error| DeviceError::Adb(error.to_string()))?;
         if !output.status.success() {
             let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
             return Err(DeviceError::Adb(if message.is_empty() {
@@ -116,15 +133,30 @@ impl AdbRunner for ProcessAdb {
     }
 
     fn push(&self, serial: &str, local: &Path, remote: &str) -> Result<String, DeviceError> {
-        let output = Command::new(&self.path)
+        let mut child = Command::new(&self.path)
             .args(["-s", serial, "push"])
             .arg(local)
             .arg(remote)
-            .output()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .map_err(|error| DeviceError::Start {
                 path: self.path.clone(),
                 message: error.to_string(),
             })?;
+        let status = child
+            .wait_timeout(Duration::from_secs(ADB_PUSH_TIMEOUT_SECONDS))
+            .map_err(|error| DeviceError::Adb(error.to_string()))?;
+        if status.is_none() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(DeviceError::Adb(format!(
+                "push timed out after {ADB_PUSH_TIMEOUT_SECONDS} seconds"
+            )));
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|error| DeviceError::Adb(error.to_string()))?;
         if !output.status.success() {
             let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
             return Err(DeviceError::Adb(if message.is_empty() {
@@ -136,6 +168,9 @@ impl AdbRunner for ProcessAdb {
         String::from_utf8(output.stdout).map_err(|_| DeviceError::InvalidOutput)
     }
 }
+
+const ADB_COMMAND_TIMEOUT_SECONDS: u64 = 10;
+const ADB_PUSH_TIMEOUT_SECONDS: u64 = 120;
 
 pub fn discover_adb_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("APP_TESTER_ADB") {

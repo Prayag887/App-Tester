@@ -17,10 +17,9 @@ use hudsucker::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    net::{SocketAddr, TcpStream},
+    net::SocketAddr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Duration,
 };
 use time::OffsetDateTime;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -496,31 +495,22 @@ impl ProxyService {
             self.set_status(ProxyStatus::CertificateRequired);
             anyhow::bail!("CA certificate is required");
         }
-        let initial_port = config.port;
-        let Some(port) = (initial_port..initial_port.saturating_add(10)).find(|port| {
-            TcpStream::connect_timeout(
-                &SocketAddr::from(([127, 0, 0, 1], *port)),
-                Duration::from_millis(100),
-            )
-            .is_err()
-        }) else {
-            self.set_status(ProxyStatus::Failed);
-            anyhow::bail!(
-                "no capture proxy port is available between {initial_port} and {}",
-                initial_port.saturating_add(9)
-            );
-        };
-        config.port = port;
-        *self.config.lock().expect("proxy config lock") = config.clone();
         let bind_address: SocketAddr =
             format!("{}:{}", config.bind_address, config.port).parse()?;
-        // Hudsucker binds when its background task starts. Reserve the address
-        // first so a port conflict is returned to the caller before any Android
-        // device is configured to route traffic to a proxy that never started.
-        std::net::TcpListener::bind(bind_address).map_err(|error| {
-            self.set_status(ProxyStatus::Failed);
-            anyhow::anyhow!("could not bind capture proxy at {bind_address}: {error}")
-        })?;
+        let listener = tokio::net::TcpListener::bind(bind_address)
+            .await
+            .map_err(|error| {
+                self.set_status(ProxyStatus::Failed);
+                anyhow::anyhow!("could not bind capture proxy at {bind_address}: {error}")
+            })?;
+        config.port = listener
+            .local_addr()
+            .map_err(|error| {
+                self.set_status(ProxyStatus::Failed);
+                anyhow::anyhow!("could not read capture proxy address: {error}")
+            })?
+            .port();
+        *self.config.lock().expect("proxy config lock") = config.clone();
         let ca = load_authority(ca_dir)?;
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let handler = CaptureHandler {
@@ -532,7 +522,7 @@ impl ProxyService {
             preview_limit: 1024 * 1024,
         };
         let proxy = Proxy::builder()
-            .with_addr(bind_address)
+            .with_listener(listener)
             .with_ca(ca)
             .with_rustls_connector(aws_lc_rs::default_provider())
             .with_http_handler(handler)
@@ -593,6 +583,31 @@ mod tests {
         let info = generate_ca(&root).unwrap();
         assert!(info.certificate_path.exists());
         assert_eq!(info.fingerprint_sha256.len(), 64);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn dynamic_proxy_port_works_when_8080_is_occupied() {
+        let _occupied = std::net::TcpListener::bind(("127.0.0.1", 8080)).ok();
+        let root = std::env::temp_dir().join(format!("app-tester-proxy-{}", Uuid::new_v4()));
+        let certificate = generate_ca(&root).unwrap();
+        let service = ProxyService::new(
+            ProxyConfiguration {
+                bind_address: "127.0.0.1".into(),
+                port: 0,
+                ca_certificate_path: certificate.certificate_path,
+                ca_fingerprint_sha256: Some(certificate.fingerprint_sha256),
+            },
+            Arc::new(Database::open_in_memory().unwrap()),
+            EventBroadcaster::default(),
+        );
+
+        service.start(Uuid::new_v4()).await.unwrap();
+        let selected_port = service.configuration().port;
+        assert_ne!(selected_port, 0);
+        assert_ne!(selected_port, 8080);
+        assert!(std::net::TcpStream::connect(("127.0.0.1", selected_port)).is_ok());
+        service.stop().await;
         let _ = std::fs::remove_dir_all(root);
     }
 

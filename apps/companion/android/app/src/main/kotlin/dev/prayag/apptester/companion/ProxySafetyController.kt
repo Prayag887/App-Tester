@@ -83,7 +83,14 @@ class ProxySafetyController(private val context: Context) {
     }
 
     fun stopVpn(message: String = "VPN capture stopped. Direct networking resumed."): ProxySafetyStatus {
-        context.stopService(Intent(context, CaptureVpnService::class.java))
+        context.startService(
+            Intent(context, CaptureVpnService::class.java)
+                .setAction(CaptureVpnService.ACTION_STOP),
+        )
+        return markVpnStopped(message)
+    }
+
+    fun markVpnStopped(message: String = "VPN capture stopped. Direct networking resumed."): ProxySafetyStatus {
         preferences.edit().putBoolean(VPN_ACTIVE, false).putBoolean(MONITORING, false).apply()
         record(message)
         return status(message)

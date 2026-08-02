@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1] - 2026-08-02
+
+### Fixed
+
+- Capture proxy now uses an OS-assigned port propagated through ADB and the Android companion, avoiding port conflicts on user machines.
+- ADB commands now time out and device discovery prevents overlapping polls, avoiding orphan process buildup and daemon contention.
+- Stopping interception now closes the native VPN relay and Android TUN interface before stopping the service.
+
+### Changed
+
+- Android companion `0.3.4+11` is available as a direct GitHub Release download with its SHA-256 checksum.
+
 ## [0.2.0] - 2026-08-02
 
 ### Added
