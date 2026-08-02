@@ -14,13 +14,13 @@ It does not tap, swipe, crawl screens, choose actions, or download AI models.
 
 Core capture and analysis runs in Rust. The UI displays state, filters traffic, requests actions, and copies already-redacted values.
 
-Devices can connect through USB, an existing wireless ADB connection, or the **Connect via QR** flow. QR pairing uses Android's standard wireless-debugging payload and built-in pairing scanner on Android 11 and newer.
+Devices connect through authorized USB only. Desktop installs or opens the companion through ADB and relays capture traffic through `adb reverse`; no QR, camera, Wi-Fi pairing, or LAN proxy setup is used.
 
 ## Development
 
 Requirements: Rust 1.86+, pnpm, Android Platform Tools, and a connected Android device or emulator.
 
-Building the desktop installer also requires Flutter because it embeds the companion APK used by the same-Wi-Fi QR install flow.
+Desktop installers embed the signed companion APK from `apps/companion/releases`, so every desktop platform installs the same verified Android build over USB.
 
 ```bash
 pnpm install

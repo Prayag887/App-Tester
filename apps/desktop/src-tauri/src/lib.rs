@@ -1,18 +1,16 @@
 use androidqa_core::{
-    AdbRunner, AndroidApp, AndroidDevice, ProcessAdb, android,
-    android::{AndroidCertificateInstall, QrPairingChallenge, QrPairingResult, QrPairingSecret},
+    AdbRunner, AndroidApp, AndroidDevice, AuthorizationStatus, ConnectionType, ProcessAdb, android,
+    android::AndroidCertificateInstall,
     events::{EventBroadcaster, InspectorEvent},
     launch_app, list_devices, list_third_party_apps,
     persistence::Database,
-    proxy::{
-        CertificateInfo, CompanionApp, ProxyConfiguration, ProxyService, ProxyStatus, generate_ca,
-    },
+    proxy::{CertificateInfo, ProxyConfiguration, ProxyService, ProxyStatus, generate_ca},
     replay::ReplaySummary,
     traffic::HttpTransaction,
 };
 use serde::Serialize;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     net::UdpSocket,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -48,27 +46,14 @@ struct AndroidCaChange {
     rebooting: bool,
 }
 
+const COMPANION_PACKAGE: &str = "dev.prayag.apptester.companion";
+const MINIMUM_COMPANION_VERSION_CODE: u64 = 9;
+const PROXY_PORT: u16 = 8080;
+
 #[derive(Debug, Serialize)]
-struct CompanionInstall {
-    install_url: String,
-    qr_svg: String,
-}
-
-#[derive(serde::Serialize)]
-struct CompanionConnection {
-    payload: String,
-    qr_svg: String,
-    token: String,
-}
-
-#[derive(serde::Serialize)]
-struct CompanionConnectionPayload<'a> {
-    protocol: &'static str,
-    version: u8,
-    host: &'a str,
-    port: u16,
-    token: &'a str,
-    minimum_companion_version: &'static str,
+struct CompanionStatus {
+    installed: bool,
+    package_name: &'static str,
 }
 
 struct InspectorState {
@@ -76,7 +61,6 @@ struct InspectorState {
     database: Arc<Database>,
     session_id: Mutex<Option<Uuid>>,
     ca_directory: std::path::PathBuf,
-    qr_pairings: Mutex<HashMap<Uuid, QrPairingSecret>>,
     logcat_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     configured_device: Mutex<Option<String>>,
     configured_device_path: std::path::PathBuf,
@@ -86,7 +70,14 @@ struct InspectorState {
 async fn discover_devices() -> Result<Vec<AndroidDevice>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
-        list_devices(&adb).map_err(|error| error.to_string())
+        list_devices(&adb)
+            .map(|devices| {
+                devices
+                    .into_iter()
+                    .filter(|device| device.connection_type == ConnectionType::Usb)
+                    .collect()
+            })
+            .map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| format!("device discovery task failed: {error}"))?
@@ -112,94 +103,143 @@ async fn launch_installed_app(serial: String, package_name: String) -> Result<()
     .map_err(|error| format!("application launch task failed: {error}"))?
 }
 
-#[tauri::command]
-fn begin_qr_pairing(state: tauri::State<'_, InspectorState>) -> Result<QrPairingChallenge, String> {
-    let (challenge, secret) = android::create_qr_pairing().map_err(|error| error.to_string())?;
-    state
-        .qr_pairings
-        .lock()
-        .map_err(|_| "QR pairing lock poisoned")?
-        .insert(challenge.id, secret);
-    Ok(challenge)
+fn authorized_usb(adb: &ProcessAdb, serial: &str) -> Result<(), String> {
+    let connected = list_devices(adb)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .any(|device| {
+            device.serial == serial
+                && device.connection_type == ConnectionType::Usb
+                && device.authorization_status == AuthorizationStatus::Authorized
+        });
+    connected
+        .then_some(())
+        .ok_or_else(|| "connect and authorize this phone over USB".into())
 }
 
 #[tauri::command]
-fn prepare_companion_install(app: tauri::AppHandle) -> Result<CompanionInstall, String> {
-    companion_apk_path(&app)?;
-    let install_url = "https://github.com/Prayag887/postman-like/releases/download/v0.1.1/app-tester-companion-0.2.2.apk".to_string();
-    let qr_svg = qrcode::QrCode::new(install_url.as_bytes())
-        .map_err(|error| format!("could not create the companion install QR code: {error}"))?
-        .render::<qrcode::render::svg::Color>()
-        .min_dimensions(320, 320)
-        .dark_color(qrcode::render::svg::Color("#08110f"))
-        .light_color(qrcode::render::svg::Color("#ffffff"))
-        .build();
-    Ok(CompanionInstall {
-        install_url,
-        qr_svg,
+async fn get_companion_status(serial: String) -> Result<CompanionStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        authorized_usb(&adb, &serial)?;
+        let installed = android::package_installed(&adb, &serial, COMPANION_PACKAGE)
+            .map_err(|error| error.to_string())?
+            && android::package_version_code(&adb, &serial, COMPANION_PACKAGE)
+                .map_err(|error| error.to_string())?
+                .is_some_and(|version| version >= MINIMUM_COMPANION_VERSION_CODE);
+        Ok(CompanionStatus {
+            installed,
+            package_name: COMPANION_PACKAGE,
+        })
     })
+    .await
+    .map_err(|error| format!("companion status task failed: {error}"))?
 }
 
 #[tauri::command]
-fn prepare_companion_connection(host: String) -> Result<CompanionConnection, String> {
-    android::validate_companion_connection(&host).map_err(|error| error.to_string())?;
-    let token = Uuid::new_v4().simple().to_string();
-    let payload = serde_json::to_string(&CompanionConnectionPayload {
-        protocol: "app-tester-companion",
-        version: 2,
-        host: &host,
-        port: 8080,
-        token: &token,
-        minimum_companion_version: "0.2.2",
-    })
-    .map_err(|error| format!("could not encode companion connection: {error}"))?;
-    let qr_svg = qrcode::QrCode::new(payload.as_bytes())
-        .map_err(|error| format!("could not create companion connection QR code: {error}"))?
-        .render::<qrcode::render::svg::Color>()
-        .min_dimensions(320, 320)
-        .dark_color(qrcode::render::svg::Color("#08110f"))
-        .light_color(qrcode::render::svg::Color("#ffffff"))
-        .build();
-    Ok(CompanionConnection {
-        payload,
-        qr_svg,
-        token,
-    })
-}
-
-#[tauri::command]
-fn list_companion_apps(
-    state: tauri::State<'_, InspectorState>,
-    token: String,
-) -> Vec<CompanionApp> {
-    state.proxy.companion_apps(&token)
-}
-
-#[tauri::command]
-fn select_companion_package(
-    state: tauri::State<'_, InspectorState>,
-    token: String,
-    package_name: String,
-) -> Result<(), String> {
-    state
-        .proxy
-        .select_companion_package(&token, &package_name)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn install_companion(app: tauri::AppHandle, serial: String) -> Result<String, String> {
+async fn install_companion(
+    app: tauri::AppHandle,
+    serial: String,
+) -> Result<CompanionStatus, String> {
     let apk_path = companion_apk_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        authorized_usb(&adb, &serial)?;
+        let existing_version = android::package_version_code(&adb, &serial, COMPANION_PACKAGE)
+            .map_err(|error| error.to_string())?;
+        if existing_version.is_some_and(|version| version >= MINIMUM_COMPANION_VERSION_CODE) {
+            return Ok(CompanionStatus {
+                installed: true,
+                package_name: COMPANION_PACKAGE,
+            });
+        }
         let apk = apk_path
             .to_str()
             .ok_or_else(|| "companion APK path contains unsupported characters".to_string())?;
-        adb.run(&["-s", &serial, "install", "-r", apk])
-            .map_err(|error| error.to_string())
+        let mut install_args = vec!["-s", &serial, "install"];
+        if existing_version.is_some() {
+            install_args.push("-r");
+        }
+        install_args.push(apk);
+        adb.run(&install_args).map_err(|error| error.to_string())?;
+        let installed = android::package_installed(&adb, &serial, COMPANION_PACKAGE)
+            .map_err(|error| error.to_string())?;
+        installed
+            .then_some(CompanionStatus {
+                installed,
+                package_name: COMPANION_PACKAGE,
+            })
+            .ok_or_else(|| "companion install finished but package was not found".into())
     })
     .await
     .map_err(|error| format!("companion install task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn open_companion(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+    package_name: Option<String>,
+) -> Result<(), String> {
+    let certificate_path = state.proxy.configuration().ca_certificate_path.clone();
+    if !certificate_path.exists() {
+        generate_ca(&state.ca_directory).map_err(|error| error.to_string())?;
+    }
+    let ca_pem = std::fs::read_to_string(&certificate_path)
+        .map_err(|error| format!("could not read App Tester CA: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        authorized_usb(&adb, &serial)?;
+        if !android::package_installed(&adb, &serial, COMPANION_PACKAGE)
+            .map_err(|error| error.to_string())?
+        {
+            return Err("install App Tester Companion before opening it".into());
+        }
+        adb.push(
+            &serial,
+            &certificate_path,
+            "/sdcard/Download/AppTester-HTTPS-CA.pem",
+        )
+        .map_err(|error| error.to_string())?;
+        let package_name = package_name.filter(|package| !package.trim().is_empty());
+        if package_name.is_some() {
+            android::configure_usb_relay(&adb, &serial, PROXY_PORT)
+                .map_err(|error| error.to_string())?;
+        }
+        android::launch_usb_companion(
+            &adb,
+            &serial,
+            COMPANION_PACKAGE,
+            package_name.as_deref(),
+            PROXY_PORT,
+            &ca_pem,
+        )
+        .map_err(|error| error.to_string())?;
+        if package_name.is_some() {
+            for _ in 0..120 {
+                if android::companion_vpn_active(&adb, &serial, COMPANION_PACKAGE)
+                    .map_err(|error| error.to_string())?
+                {
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            return Err("Companion VPN did not start within 30 seconds. Approve the VPN prompt on the phone, then start capture again.".into());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("companion launch task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn remove_usb_relay(serial: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        android::remove_usb_relay(&adb, &serial, PROXY_PORT).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("USB relay cleanup task failed: {error}"))?
 }
 
 fn companion_apk_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -207,64 +247,16 @@ fn companion_apk_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .path()
         .resource_dir()
         .map_err(|error| error.to_string())?
-        .join("_up_/_up_/companion/build/app/outputs/flutter-apk/app-release.apk");
+        .join("_up_/_up_/companion/releases/app-tester-companion.apk");
     if bundled.is_file() {
         return Ok(bundled);
     }
     let development = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../companion/build/app/outputs/flutter-apk/app-release.apk");
-    development.is_file().then_some(development).ok_or_else(|| {
-        "App Tester Companion has not been built yet. Build apps/companion first.".into()
-    })
-}
-
-#[tauri::command]
-async fn finish_qr_pairing(
-    state: tauri::State<'_, InspectorState>,
-    pairing_id: Uuid,
-) -> Result<QrPairingResult, String> {
-    let secret = state
-        .qr_pairings
-        .lock()
-        .map_err(|_| "QR pairing lock poisoned")?
-        .remove(&pairing_id)
-        .ok_or_else(|| "QR pairing request was not found or already used".to_owned())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
-        loop {
-            match android::finish_qr_pairing(&adb, &secret).map_err(|error| error.to_string())? {
-                Some(result) => return Ok(result),
-                None => std::thread::sleep(Duration::from_millis(500)),
-            }
-        }
-    })
-    .await
-    .map_err(|error| format!("QR pairing task failed: {error}"))?
-}
-
-#[tauri::command]
-async fn pair_with_code(
-    host: String,
-    port: u16,
-    pairing_code: String,
-) -> Result<QrPairingResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
-        android::pair_with_code(&adb, &host, port, &pairing_code).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("pairing-code task failed: {error}"))?
-}
-
-#[tauri::command]
-async fn enable_usb_wifi(serial: String, port: Option<u16>) -> Result<QrPairingResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
-        android::enable_usb_wifi(&adb, &serial, port.unwrap_or(5555))
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("USB Wi-Fi task failed: {error}"))?
+        .join("../../companion/releases/app-tester-companion.apk");
+    development
+        .is_file()
+        .then_some(development)
+        .ok_or_else(|| "The signed App Tester Companion release APK is missing.".into())
 }
 
 #[tauri::command]
@@ -539,10 +531,13 @@ async fn start_logcat_capture(
                 "-s",
                 &serial,
                 "logcat",
+                "-T",
+                "1",
                 &format!("--uid={uid}"),
                 "-v",
                 "epoch",
             ])
+            .kill_on_drop(true)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -572,6 +567,18 @@ async fn start_logcat_capture(
                     }
                     if !pending.is_empty() {
                         pending.push(log_line.clone());
+                        if pending.len() >= 200 {
+                            emit_logcat_incident(
+                                &events,
+                                session_id,
+                                &package_name,
+                                &adb_path,
+                                &serial,
+                                std::mem::take(&mut pending),
+                            )
+                            .await;
+                            context.clear();
+                        }
                     }
                     context.push_back(log_line);
                     if context.len() > 50 {
@@ -600,6 +607,7 @@ async fn start_logcat_capture(
                         std::mem::take(&mut pending),
                     )
                     .await;
+                    context.clear();
                 }
                 Err(_) => {}
             }
@@ -890,7 +898,6 @@ pub fn run() {
                 database,
                 session_id: Mutex::new(None),
                 ca_directory,
-                qr_pairings: Mutex::new(HashMap::new()),
                 logcat_task: Mutex::new(None),
                 configured_device: Mutex::new(None),
                 configured_device_path,
@@ -901,15 +908,10 @@ pub fn run() {
             discover_devices,
             list_installed_apps,
             launch_installed_app,
-            begin_qr_pairing,
-            prepare_companion_install,
-            prepare_companion_connection,
-            list_companion_apps,
-            select_companion_package,
+            get_companion_status,
             install_companion,
-            finish_qr_pairing,
-            pair_with_code,
-            enable_usb_wifi,
+            open_companion,
+            remove_usb_relay,
             prepare_android_certificate_install,
             get_android_ca_status,
             set_android_ca_usage,

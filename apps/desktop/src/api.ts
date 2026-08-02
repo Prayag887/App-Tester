@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CompanionApp, CompanionConnection, CompanionInstall, HttpTransaction, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary } from "./types";
+import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CompanionStatus, HttpTransaction, ProxyStatus, ReplaySummary } from "./types";
 const native = () => "__TAURI_INTERNALS__" in window;
 export const discoverDevices = async (): Promise<AndroidDevice[]> => native() ? invoke("discover_devices") : [];
 export const listInstalledApps = async (serial: string): Promise<AndroidApp[]> => invoke("list_installed_apps", { serial });
@@ -31,19 +31,14 @@ export const listTransactions = async ():Promise<HttpTransaction[]> => native()
   : [];
 export const deleteAllTransactions = async ():Promise<void> => invoke("delete_all_transactions");
 export const testYesterdaysApis = async ():Promise<ReplaySummary> => invoke("test_yesterdays_apis");
-export const beginQrPairing = async ():Promise<QrPairingChallenge> => invoke("begin_qr_pairing");
-export const prepareCompanionInstall = async ():Promise<CompanionInstall> => invoke("prepare_companion_install");
-export const prepareCompanionConnection = async (host:string):Promise<CompanionConnection> =>
-  invoke("prepare_companion_connection", { host });
-export const listCompanionApps = async (token:string):Promise<CompanionApp[]> => invoke("list_companion_apps", {token});
-export const selectCompanionPackage = async (token:string, packageName:string):Promise<void> =>
-  invoke("select_companion_package", {token, packageName});
-export const installCompanion = async (serial:string):Promise<string> => invoke("install_companion", { serial });
-export const finishQrPairing = async (pairingId:string):Promise<QrPairingResult> => invoke("finish_qr_pairing",{pairingId});
-export const pairWithCode = async (host:string, port:number, pairingCode:string):Promise<QrPairingResult> =>
-  invoke("pair_with_code", { host, port, pairingCode });
-export const enableUsbWifi = async (serial:string, port=5555):Promise<QrPairingResult> =>
-  invoke("enable_usb_wifi", { serial, port });
+export const getCompanionStatus = async (serial:string):Promise<CompanionStatus> =>
+  invoke("get_companion_status", { serial });
+export const installCompanion = async (serial:string):Promise<CompanionStatus> =>
+  invoke("install_companion", { serial });
+export const openCompanion = async (serial:string, packageName?:string):Promise<void> =>
+  invoke("open_companion", { serial, packageName });
+export const removeUsbRelay = async (serial:string):Promise<void> =>
+  invoke("remove_usb_relay", { serial });
 export const prepareAndroidCertificateInstall = async (serial:string):Promise<AndroidCertificateInstall> =>
   invoke("prepare_android_certificate_install", { serial });
 export const getAndroidCaStatus = async (serial:string, connectionType:string):Promise<AndroidCaStatus> =>

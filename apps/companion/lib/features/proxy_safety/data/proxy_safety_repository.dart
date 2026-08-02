@@ -2,6 +2,7 @@ class ProxySafetyStatus {
   const ProxySafetyStatus({
     required this.isMonitoring,
     required this.isVpnActive,
+    required this.caAvailable,
     this.host,
     this.port,
     this.message,
@@ -11,6 +12,7 @@ class ProxySafetyStatus {
 
   final bool isMonitoring;
   final bool isVpnActive;
+  final bool caAvailable;
   final String? host;
   final int? port;
   final String? message;
@@ -21,6 +23,7 @@ class ProxySafetyStatus {
       ProxySafetyStatus(
         isMonitoring: values['isMonitoring'] == true,
         isVpnActive: values['isVpnActive'] == true,
+        caAvailable: values['caAvailable'] == true,
         host: values['host'] as String?,
         port: values['port'] as int?,
         message: values['message'] as String?,
@@ -37,14 +40,14 @@ class CompanionLogEntry {
   final String time;
   final String message;
   factory CompanionLogEntry.fromMap(Map<Object?, Object?> values) =>
-      CompanionLogEntry(time: values['time'] as String? ?? '', message: values['message'] as String? ?? '');
+      CompanionLogEntry(
+          time: values['time'] as String? ?? '',
+          message: values['message'] as String? ?? '');
 }
 
 abstract interface class ProxySafetyRepository {
-  Future<List<Map<String, String>>> installedDebugApps();
   Future<ProxySafetyStatus> status();
-  Future<ProxySafetyStatus> startMonitoring({required String host, required int port});
-  Future<ProxySafetyStatus> stopMonitoring();
-  Future<ProxySafetyStatus> startVpn({required String host, required int port, required String targetPackage});
   Future<ProxySafetyStatus> stopVpn();
+  Future<ProxySafetyStatus> installCa();
+  Future<ProxySafetyStatus> removeCa();
 }

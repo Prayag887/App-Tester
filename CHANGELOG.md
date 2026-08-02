@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0] - 2026-08-02
+
+### Added
+
+- USB-only Android companion installation, launch, capture relay, and disconnect controls.
+- Companion-managed HTTPS CA setup/removal guidance and immediate direct-network recovery.
+- Searchable debug-package picker that opens the selected Android application.
+- Specific DNS, timeout, connection, DTO, database, memory, and framework log summaries.
+
+### Changed
+
+- Android capture now uses per-app VPN traffic through `adb reverse` instead of a global device proxy.
+- USB loss stops interception on the phone within one failed relay health check.
+- Desktop releases embed one signed companion APK across macOS, Windows, and Linux builds.
+
+### Removed
+
+- QR scanning, camera permission, Wi-Fi pairing, wireless ADB handoff, and LAN companion registration.
+
 ## [0.1.1] - 2026-07-26
 
 ### Added

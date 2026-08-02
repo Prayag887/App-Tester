@@ -14,6 +14,7 @@ data class ProxySafetyStatus(
     val port: Int?,
     val message: String?,
     val targetPackage: String?,
+    val caAvailable: Boolean,
     val logs: List<Map<String, String>>,
 ) {
     fun asMap() = mapOf(
@@ -23,6 +24,7 @@ data class ProxySafetyStatus(
         "port" to port,
         "message" to message,
         "targetPackage" to targetPackage,
+        "caAvailable" to caAvailable,
         "logs" to logs,
     )
 }
@@ -40,26 +42,9 @@ class ProxySafetyController(private val context: Context) {
             port,
             message ?: preferences.getString(MESSAGE, null),
             preferences.getString(TARGET_PACKAGE, null),
+            preferences.contains(CA_PEM),
             readLogs(),
         )
-    }
-
-    fun startMonitoring(host: String, port: Int): ProxySafetyStatus {
-        require(host.isNotBlank()) { "Desktop host is required." }
-        require(port in 1..65535) { "Proxy port must be between 1 and 65535." }
-        record("Desktop link started for $host:$port")
-        preferences.edit().putString(HOST, host).putInt(PORT, port).putBoolean(MONITORING, true).apply()
-        val intent = Intent(context, ProxySafetyService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
-        return status("Checking $host:$port in the background.")
-    }
-
-    fun stopMonitoring(message: String = "Desktop link stopped. Direct networking is unchanged."): ProxySafetyStatus {
-        context.stopService(Intent(context, ProxySafetyService::class.java))
-        record(message)
-        preferences.edit().remove(HOST).remove(PORT).remove(TARGET_PACKAGE)
-            .putBoolean(MONITORING, false).putBoolean(VPN_ACTIVE, false).apply()
-        return status(message)
     }
 
     fun configureVpn(host: String, port: Int, targetPackage: String): ProxySafetyStatus {
@@ -73,6 +58,13 @@ class ProxySafetyController(private val context: Context) {
         return status("Approve Android's VPN consent to start capture for $targetPackage.")
     }
 
+    fun configureCa(pem: String) {
+        require(pem.contains("BEGIN CERTIFICATE")) { "Desktop CA certificate is invalid." }
+        preferences.edit().putString(CA_PEM, pem).apply()
+    }
+
+    fun caPem(): String? = preferences.getString(CA_PEM, null)
+
     fun startVpn(): ProxySafetyStatus {
         val endpoint = endpoint() ?: throw IllegalArgumentException("Desktop host and proxy port are required.")
         val targetPackage = preferences.getString(TARGET_PACKAGE, null)
@@ -82,13 +74,17 @@ class ProxySafetyController(private val context: Context) {
             .putExtra(CaptureVpnService.EXTRA_PORT, endpoint.second)
             .putExtra(CaptureVpnService.EXTRA_PACKAGE, targetPackage)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
-        preferences.edit().putBoolean(VPN_ACTIVE, true).apply()
         return status("Starting VPN capture relay for $targetPackage.")
+    }
+
+    fun markVpnActive(targetPackage: String) {
+        preferences.edit().putBoolean(VPN_ACTIVE, true).putBoolean(MONITORING, true).apply()
+        record("USB capture active for $targetPackage")
     }
 
     fun stopVpn(message: String = "VPN capture stopped. Direct networking resumed."): ProxySafetyStatus {
         context.stopService(Intent(context, CaptureVpnService::class.java))
-        preferences.edit().putBoolean(VPN_ACTIVE, false).apply()
+        preferences.edit().putBoolean(VPN_ACTIVE, false).putBoolean(MONITORING, false).apply()
         record(message)
         return status(message)
     }
@@ -118,6 +114,7 @@ class ProxySafetyController(private val context: Context) {
         private const val MESSAGE = "message"
         private const val TARGET_PACKAGE = "target_package"
         private const val VPN_ACTIVE = "vpn_active"
+        private const val CA_PEM = "ca_pem"
         private const val LOGS = "logs"
         private const val MAX_LOGS = 100
     }

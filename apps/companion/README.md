@@ -1,13 +1,13 @@
 # App Tester Companion
 
-The companion is a regular Android application: it does not request device-owner, device-admin, accessibility, or root access. It provides a branded desktop-link screen and a persistent activity log so a person can verify that the desktop endpoint is reachable before starting a desktop capture.
+The companion is a USB-only Android application. It does not request camera, device-owner, device-admin, accessibility, or root access.
 
 ## What it does
 
-1. Accepts the **Desktop host** displayed in green by the desktop App Tester capture header and the Android package selected for capture.
-2. Requests Android's normal one-time VPN consent and routes **only that package** through the desktop HTTP capture proxy.
+1. Receives the selected package and fixed localhost relay from desktop through an ADB launch intent.
+2. Requests Android's normal one-time VPN consent and routes **only that package** through `adb reverse` to desktop.
 3. Runs a complete `tun2socks` packet-forwarding engine in the foreground VPN service, including TCP, UDP, DNS, IPv4, and IPv6 handling.
-4. Checks the desktop endpoint every five seconds. After three failures, it stops the VPN; Android restores the selected app's direct networking automatically.
+4. Checks the USB relay every second. One failure stops the VPN; Android restores the selected app's direct networking automatically.
 5. Retains endpoint and VPN lifecycle events in the in-app activity log.
 
 ## Permissions and behavior
@@ -32,5 +32,5 @@ Release signing remains required. Create the ignored `android/signing.properties
 
 - `lib/features/proxy_safety/`: desktop-link state, repository, view model, and screen.
 - `lib/shared/brand/`: the code-native App Tester mark shared visually with desktop branding.
-- `android/...`: foreground endpoint monitor and Flutter method channel.
+- `android/...`: USB launch handling, per-app VPN service, and Flutter method channel.
 - `vpn_engine/`: Go/JNI binding for the MIT-licensed `xjasonlyu/tun2socks` engine. `build-android.sh` produces arm64 and x86_64 relay libraries as part of the Android Gradle pre-build task.

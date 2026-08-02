@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App, bodyText, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, preferredDevice } from "./App";
+import { App, bodyText, compactEndpoint, developerIncidentReport, displayState, duration, endpointIsExcluded, endpointSuggestions, fullEndpoint, incidentLocation, incidentTotals, isInterceptionTlsNoise, matchingApps, preferredDevice } from "./App";
 import { collectTransactionPages } from "./api";
 import type { AndroidDevice, HttpTransaction, LogIncident } from "./types";
 const transaction = { response: undefined, timing: {request_started_ms:100}, comparison: undefined } as HttpTransaction;
@@ -31,12 +31,20 @@ describe("traffic presentation", () => {
     expect(compactEndpoint("https://www.api.example.com/v1/users")).toBe("api.example/v1/users");
     expect(compactEndpoint("http://service.dev:8080/health")).toBe("service:8080/health");
   });
-  it("prefers a USB device while preserving a valid explicit selection", () => {
+  it("selects only authorized USB devices", () => {
     const usb = {serial:"oneplus",connection_type:"usb",authorization_status:"authorized"} as AndroidDevice;
     const emulator = {serial:"emulator",connection_type:"emulator",authorization_status:"authorized"} as AndroidDevice;
     expect(preferredDevice("", [emulator, usb])).toBe("oneplus");
-    expect(preferredDevice("emulator", [emulator, usb])).toBe("emulator");
+    expect(preferredDevice("emulator", [emulator, usb])).toBe("oneplus");
     expect(preferredDevice("disconnected", [emulator, usb])).toBe("oneplus");
+  });
+  it("searches debuggable packages by package name or version", () => {
+    const apps = [
+      {package_name:"com.yajtech.eynorixdev",version_name:"1.0.10",debuggable:true},
+      {package_name:"com.example.other",version_name:"2.4",debuggable:true},
+    ];
+    expect(matchingApps(apps, "EYNORIX").map(app => app.package_name)).toEqual(["com.yajtech.eynorixdev"]);
+    expect(matchingApps(apps, "2.4").map(app => app.package_name)).toEqual(["com.example.other"]);
   });
   it("loads every transaction page instead of truncating the display at 250 hits", async () => {
     const hits = Array.from({length:620}, (_, index) => ({...transaction,id:`tx-${index}`} as HttpTransaction));
@@ -54,8 +62,10 @@ describe("traffic presentation", () => {
     expect(markup).not.toContain("Connect via QR");
     expect(markup).not.toContain("Pair with code");
     expect(markup).not.toContain("USB to Wi-Fi");
-    expect(markup).toContain('<select aria-label="Package"');
-    expect(markup).not.toContain('<select aria-label="Package" disabled');
+    expect(markup).not.toContain("Download app");
+    expect(markup).not.toContain("Connect companion");
+    expect(markup).toContain("Install companion");
+    expect(markup).toContain('aria-label="Search debuggable packages"');
   });
   it("shows an application frame as the incident location with a Logcat fallback", () => {
     const incident = {first_app_frame:"at com.example.Home.load(Home.kt:42)",foreground_activity:"com.example/.HomeActivity",lines:[
@@ -71,5 +81,15 @@ describe("developer incident report", () => {
     expect(report).toContain("Where: at com.example.Checkout.submit");
     expect(report).toContain("2. Tap Pay");
     expect(report).toContain("E AndroidRuntime: FATAL EXCEPTION");
+  });
+  it("counts repeated incidents instead of only unique signatures", () => {
+    const repeated = {...incident,category:"network",occurrence_count:3} as LogIncident;
+    const warning = {...incident,category:"warning",occurrence_count:2} as LogIncident;
+    expect(incidentTotals([repeated, warning])).toEqual({total:5,errors:3,warnings:2});
+  });
+  it("hides trust failures caused by interception", () => {
+    const tls = {...incident, title:"TLS certificate not trusted", root_cause:"CertPathValidatorException: Trust anchor for certification path not found."} as LogIncident;
+    expect(isInterceptionTlsNoise(tls)).toBe(true);
+    expect(isInterceptionTlsNoise(incident)).toBe(false);
   });
 });

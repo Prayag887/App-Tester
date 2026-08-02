@@ -45,6 +45,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
+      - name: Verify bundled companion APK
+        shell: bash
+        run: |
+          test -s apps/companion/releases/app-tester-companion.apk
+          sha256sum -c apps/companion/releases/app-tester-companion.apk.sha256
+          unzip -t apps/companion/releases/app-tester-companion.apk
+          unzip -Z1 apps/companion/releases/app-tester-companion.apk | grep -q '^lib/arm64-v8a/libapptester_tun2socks.so$'
+          unzip -Z1 apps/companion/releases/app-tester-companion.apk | grep -q '^lib/x86_64/libapptester_tun2socks.so$'
+          ! unzip -Z1 apps/companion/releases/app-tester-companion.apk | grep -q '^lib/armeabi-v7a/'
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

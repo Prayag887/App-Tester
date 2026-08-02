@@ -74,6 +74,12 @@ pub fn parse_logcat_epoch_line(line: &str) -> Option<FocusedLogLine> {
 }
 
 pub fn classify(message: &str) -> Option<(IncidentCategory, &'static str)> {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("trust anchor for certification path not found")
+        || lower.contains("certpathvalidatorexception")
+    {
+        return None;
+    }
     let patterns = [
         (
             IncidentCategory::Crash,
@@ -123,7 +129,12 @@ pub fn classify(message: &str) -> Option<(IncidentCategory, &'static str)> {
         (
             IncidentCategory::Network,
             "Network failure",
-            r"(?i)UnknownHostException|ConnectException|SocketTimeoutException|SSLHandshakeException|CertPathValidatorException|CertificateException|Trust anchor",
+            r"(?i)UnknownHostException|ConnectException|SocketTimeoutException|SSLHandshakeException|CertificateException",
+        ),
+        (
+            IncidentCategory::Memory,
+            "Memory exhausted",
+            r"(?i)OutOfMemoryError|Failed to allocate|low memory killer|allocation failed|memory pressure",
         ),
     ];
     patterns.into_iter().find_map(|(category, title, pattern)| {
@@ -148,16 +159,23 @@ fn causal_exception(lines: &[FocusedLogLine]) -> Option<String> {
 
 fn human_summary(category: IncidentCategory, root: &str, cause: Option<&str>) -> String {
     let combined = format!("{root}\n{}", cause.unwrap_or(""));
-    if combined
-        .to_ascii_lowercase()
-        .contains("trust anchor for certification path not found")
-    {
+    let lower = combined.to_ascii_lowercase();
+    if lower.contains("trust anchor for certification path not found") {
         return "The app could not establish a trusted HTTPS connection because Android does not trust the server certificate chain. This commonly happens when a proxy or self-signed certificate has not been installed or allowed for this app.".into();
     }
     match category {
-        IncidentCategory::Network => "A network request failed before the app received a response. Review the root cause and the screen context to identify the affected call.".into(),
+        IncidentCategory::Network if lower.contains("unknownhostexception") => "DNS lookup failed, so the app could not resolve the API hostname. Check connectivity, hostname spelling, VPN, and DNS configuration.".into(),
+        IncidentCategory::Network if lower.contains("sockettimeoutexception") || lower.contains("timed out") => "The API connection or response exceeded its timeout. Check server latency, network quality, and the client timeout configured for this request.".into(),
+        IncidentCategory::Network if lower.contains("connectexception") || lower.contains("connection refused") => "The app reached the host but could not open a connection. The server may be unavailable, the port may be closed, or the endpoint may be incorrect.".into(),
+        IncidentCategory::Network => "A network request failed before the app received a usable response. Root cause and screen context identify the affected connection.".into(),
         IncidentCategory::Crash => "The app hit an unrecovered exception and crashed. The root cause below identifies the failing code path.".into(),
         IncidentCategory::Anr => "The app stopped responding long enough for Android to report an ANR. The screen context shows where the user was when it happened.".into(),
+        IncidentCategory::DtoParsing => "The app received data it could not deserialize into its expected model. Compare the response schema with the DTO field and type named in the root cause.".into(),
+        IncidentCategory::Database => "A local database operation failed. The root cause distinguishes constraint, lock, corruption, cursor, or disk-capacity failures.".into(),
+        IncidentCategory::StrictMode => "Android detected blocking disk or network work, or a leaked resource. Move blocking work off the main thread or close the resource named below.".into(),
+        IncidentCategory::Memory => "The app could not allocate required memory. Inspect large images, response bodies, retained objects, and repeated allocations near the first app frame.".into(),
+        IncidentCategory::Flutter => "Flutter reported an unhandled framework or widget lifecycle failure. The root cause and first application frame identify the affected widget or plugin.".into(),
+        IncidentCategory::ReactNative => "React Native or Hermes reported an application runtime failure. Inspect the JavaScript error and first application frame below.".into(),
         _ => format!("The app reported: {root}"),
     }
 }
@@ -201,10 +219,14 @@ pub fn normalize_signature(
 ) -> String {
     let ids = Regex::new(r"\b(?:0x[0-9a-fA-F]+|\d{3,}|[0-9a-fA-F]{8}-[0-9a-fA-F-]{27})\b")
         .expect("valid regex");
+    let line_number = Regex::new(r"(?P<file>\.[A-Za-z]+):\d+\)").expect("valid frame regex");
+    let normalized_frame = frame
+        .map(|value| line_number.replace_all(value, "$file:{line})").to_string())
+        .unwrap_or_default();
     format!(
         "{category:?}|{}|{}",
         ids.replace_all(message, "{id}"),
-        frame.unwrap_or("")
+        normalized_frame
     )
 }
 
@@ -222,6 +244,13 @@ pub fn parse_incident(
     lines: Vec<FocusedLogLine>,
     foreground_activity: Option<String>,
 ) -> Option<LogIncident> {
+    if lines.iter().any(|line| {
+        let message = line.message.to_ascii_lowercase();
+        message.contains("trust anchor for certification path not found")
+            || message.contains("certpathvalidatorexception")
+    }) {
+        return None;
+    }
     let (root, category, title) = lines.iter().find_map(|line| {
         if let Some((category, title)) = classify(&line.message) {
             return Some((line, category, title));
@@ -352,34 +381,55 @@ mod tests {
     }
 
     #[test]
-    fn explains_untrusted_tls_certificates_in_plain_language() {
+    fn ignores_tls_failures_caused_by_interception() {
         let line = |message: &str| FocusedLogLine {
             timestamp_ms: 1,
             level: "E".into(),
             tag: "TRuntime".into(),
             message: message.into(),
         };
-        let incident = parse_incident(Uuid::new_v4(), "com.example", vec![
-            line("javax.net.ssl.SSLHandshakeException: Handshake failed"),
-            line("Caused by: java.security.cert.CertPathValidatorException: Trust anchor for certification path not found."),
-        ], Some("com.example/.CheckoutActivity".into())).unwrap();
-        assert_eq!(incident.title, "TLS certificate not trusted");
-        assert!(
-            incident
-                .summary
-                .contains("does not trust the server certificate chain")
+        let incident = parse_incident(
+            Uuid::new_v4(),
+            "com.example",
+            vec![
+                line("javax.net.ssl.SSLHandshakeException: Handshake failed"),
+                line(
+                    "Caused by: java.security.cert.CertPathValidatorException: Trust anchor for certification path not found.",
+                ),
+            ],
+            Some("com.example/.CheckoutActivity".into()),
         );
+        assert!(incident.is_none());
+    }
+
+    #[test]
+    fn explains_dns_timeout_and_memory_failures() {
+        let summary = human_summary(
+            IncidentCategory::Network,
+            "java.net.UnknownHostException: api.example.com",
+            None,
+        );
+        assert!(summary.contains("DNS lookup failed"));
+        let memory = classify("java.lang.OutOfMemoryError: Failed to allocate").unwrap();
+        assert_eq!(memory.0, IncidentCategory::Memory);
+        assert!(
+            human_summary(memory.0, "OutOfMemoryError", None).contains("allocate required memory")
+        );
+    }
+
+    #[test]
+    fn signatures_ignore_source_line_number_changes() {
         assert_eq!(
-            incident.foreground_activity.as_deref(),
-            Some("com.example/.CheckoutActivity")
-        );
-        assert_eq!(incident.where_occurred, "com.example/.CheckoutActivity");
-        assert!(incident.how_occurred.contains("led to"));
-        assert!(
-            incident
-                .reproduction_steps
-                .iter()
-                .any(|step| step.contains("CheckoutActivity"))
+            normalize_signature(
+                IncidentCategory::Crash,
+                "failed",
+                Some("at com.example.Home.load(Home.kt:42)")
+            ),
+            normalize_signature(
+                IncidentCategory::Crash,
+                "failed",
+                Some("at com.example.Home.load(Home.kt:91)")
+            ),
         );
     }
 }
