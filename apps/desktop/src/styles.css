@@ -137,3 +137,22 @@ pre{background:#101827;border-color:#2d3850;color:#cbd2e3}
 
 /* The expanded state must never inherit an animation height or clipping rule. */
 .issue-card.expanded .issue-details{display:block!important;height:auto!important;max-height:none!important;overflow:visible!important;opacity:1!important}.issue-card.expanded .issue-details-inner{display:grid!important;height:auto!important;min-height:auto!important;overflow:visible!important}
+
+/* Keep diagnostic cards at their natural height.  The feed, not an individual
+   card or the page, owns scrolling so incoming incidents cannot compress or
+   clip older evidence. */
+.svelte-main.logs-mode{overflow:hidden}
+.svelte-main.logs-mode>.log-feed{display:flex;flex:1 1 0;flex-direction:column;min-height:0;height:auto;overflow-x:hidden;overflow-y:auto;align-content:normal;overscroll-behavior:contain;scrollbar-gutter:stable}
+.svelte-main.logs-mode>.log-feed>.issue-card{flex:0 0 auto;min-height:max-content}
+
+/* Details are conditionally rendered by Svelte, so they never need a collapsed
+   CSS state.  Keeping them unconditionally intrinsic avoids stale grid and
+   height-transition rules winning during rapid live updates. */
+.issue-details{display:block!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;opacity:1!important;transition:none!important}
+.issue-details-inner{display:grid!important;height:auto!important;min-height:0!important;overflow:visible!important;padding:3px 17px 17px!important}
+
+/* This block is only mounted for the selected incident.  It deliberately has
+   no inherited expand/collapse rules, making the click result immediate and
+   visible even while Logcat is updating. */
+.issue-expanded-content{position:relative;display:grid!important;flex:0 0 auto!important;gap:15px;margin:-4px 0 4px 155px;padding:16px 17px 17px;border:1px solid #7058a1;border-radius:0 0 11px 11px;background:#18233a;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;visibility:visible!important;opacity:1!important}
+@media(max-width:820px){.issue-expanded-content{margin-left:0}}

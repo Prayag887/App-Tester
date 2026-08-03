@@ -1185,17 +1185,17 @@ pub fn run() {
                         &app_handle.state::<InspectorState>().configured_device_path,
                     );
                 }
-            }
-            let companion_device = app_handle
-                .state::<InspectorState>()
-                .companion_device
-                .lock()
-                .ok()
-                .and_then(|device| device.clone());
-            if let Some(serial) = companion_device
-                && let Ok(adb) = ProcessAdb::discover()
-            {
-                let _ = android::stop_usb_companion_capture(&adb, &serial);
+                let companion_device = app_handle
+                    .state::<InspectorState>()
+                    .companion_device
+                    .lock()
+                    .ok()
+                    .and_then(|device| device.clone());
+                if let Some(serial) = companion_device
+                    && let Ok(adb) = ProcessAdb::discover()
+                {
+                    let _ = android::stop_usb_companion_capture(&adb, &serial);
+                }
             }
         });
 }
