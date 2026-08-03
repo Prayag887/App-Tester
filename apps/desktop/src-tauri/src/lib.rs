@@ -870,15 +870,24 @@ async fn verify_android_proxy(serial: String) -> Result<String, String> {
 #[tauri::command]
 fn list_transactions(
     state: tauri::State<'_, InspectorState>,
+    session_id: Option<String>,
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<Vec<HttpTransaction>, String> {
-    let Some(session_id) = *state
-        .session_id
-        .lock()
-        .map_err(|_| "session lock poisoned")?
-    else {
-        return Ok(vec![]);
+    // The WebView keeps the capture ID returned when it opened the companion.
+    // Prefer that explicit ID over the process-local fallback so a UI restore
+    // cannot read a different capture session from the one receiving traffic.
+    let session_id = match session_id {
+        Some(session_id) => Uuid::parse_str(&session_id)
+            .map_err(|_| "invalid capture session id")?,
+        None => match *state
+            .session_id
+            .lock()
+            .map_err(|_| "session lock poisoned")?
+        {
+            Some(session_id) => session_id,
+            None => return Ok(vec![]),
+        },
     };
     state
         .database

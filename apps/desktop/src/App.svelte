@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { Activity, AlertCircle, ChevronDown, Circle, Copy, Download, FolderUp, ListTree, LogOut, Pause, Play, Search, ShieldCheck, Smartphone, Square, TerminalSquare, Wifi, X } from "lucide-svelte";
+  import { Activity, AlertCircle, ChevronDown, Circle, Copy, Download, FolderUp, ListTree, LogOut, Pause, Play, Search, ShieldCheck, Smartphone, Square, TerminalSquare, Trash2, Wifi, X } from "lucide-svelte";
   import * as api from "./api";
   import type { AndroidApp, AndroidDevice, HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
@@ -33,6 +33,9 @@
   let transactionRefreshInFlight = false;
   let expandedIssue = "";
   let importInput: HTMLInputElement;
+  let capturedTransactions: HttpTransaction[] = [];
+  let visibleTransactions: HttpTransaction[] = [];
+  let selectedTransaction: HttpTransaction | undefined;
 
   const duration = (tx: HttpTransaction) => tx.timing.response_complete_ms == null ? undefined : tx.timing.response_complete_ms - tx.timing.request_started_ms;
   const state = (tx: HttpTransaction) => !tx.response ? "Pending" : tx.response.status >= 400 ? "Failed" : tx.comparison?.differences.some(d => !d.ignored) ? "Changed" : "Captured";
@@ -43,12 +46,13 @@
   };
   const pretty = (value: string) => { try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; } };
   const statusLabel = () => capturing ? "Capturing live" : proxy === "running" ? "Proxy ready" : "Ready to capture";
-  const captured = () => transactions.filter(tx => tx.request.method.toUpperCase() !== "CONNECT");
-  const selected = () => captured().find(tx => tx.id === selectedId) ?? visible()[0];
-  const visible = () => captured().filter(tx => {
+  $: capturedTransactions = transactions.filter(tx => tx.request.method.toUpperCase() !== "CONNECT");
+  $: visibleTransactions = capturedTransactions.filter(tx => {
     const searchable = `${tx.request.method} ${tx.request.host} ${tx.request.path} ${tx.response?.status ?? ""}`.toLowerCase();
     return searchable.includes(query.toLowerCase()) && (!changedOnly || state(tx) === "Changed") && (!errorsOnly || state(tx) === "Failed" || tx.correlated_incidents.length > 0);
   });
+  $: selectedTransaction = capturedTransactions.find(tx => tx.id === selectedId) ?? visibleTransactions[0];
+  const selected = () => selectedTransaction;
   const selectedDevice = () => devices.find(item => item.serial === device);
   const matchingApps = () => {
     const search = packageSearch.trim().toLowerCase();
@@ -71,13 +75,25 @@
     incidents = [{ ...issue, occurrence_count }, ...incidents.filter(item => item.signature !== issue.signature)].slice(0, 100);
   }
   const upsertTransaction = (transaction: HttpTransaction) => {
-    if (transaction.session_id !== activeSessionId) return;
+    // The native proxy is the authority for the active capture.  The WebView's
+    // cached session can lag after a reconnect or restore; dropping its event
+    // leaves a database row invisible until some unrelated UI refresh.
     transactions = [transaction, ...transactions.filter(item => item.id !== transaction.id)];
+  };
+  const reconcileTransactions = (fresh: HttpTransaction[]) => {
+    // Event delivery gives us the lowest-latency update, while the database
+    // read repairs anything delivered while the WebView was unavailable. Do
+    // not let an empty/stale read erase a transaction that has just arrived.
+    const byId = new Map(transactions.map(item => [item.id, item]));
+    fresh.forEach(item => byId.set(item.id, item));
+    transactions = [...byId.values()].sort((left, right) =>
+      right.created_at.localeCompare(left.created_at),
+    );
   };
   async function refreshTransactions() {
     if (transactionRefreshInFlight) return;
     transactionRefreshInFlight = true;
-    try { transactions = await api.listTransactions(); }
+    try { reconcileTransactions(await api.listTransactions(activeSessionId)); }
     catch { /* Live events remain the primary update path. */ }
     finally { transactionRefreshInFlight = false; }
   }
@@ -175,6 +191,18 @@
     finally { busy = false; }
   }
   async function exportCapture() { try { notice = `Exported capture to ${await api.exportCaptureToFile()}`; } catch (error) { notice = String(error); } }
+  async function deleteAll() {
+    if (!window.confirm("Delete every captured request and diagnostic from this Mac? This cannot be undone.")) return;
+    busy = true;
+    try {
+      await api.deleteAllTransactions();
+      transactions = [];
+      incidents = [];
+      selectedId = "";
+      notice = "Deleted all captured traffic and diagnostics.";
+    } catch (error) { notice = `Could not delete captures: ${String(error)}`; }
+    finally { busy = false; }
+  }
   async function importCapture(event: Event) {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
@@ -235,13 +263,15 @@
       <section class="hero"><div><span>Traffic lab</span><h1>See what your app is really doing.</h1><p>Capture scoped traffic from <b>{packageName || "your selected package"}</b>.</p></div><div class="hero-host"><small>DESKTOP HOST</small><b>{desktopHost}</b></div></section>
       <section class="toolbar">
         <label class="search-field"><Search size={17}/><input bind:value={query} placeholder="Search requests, hosts, paths…" /></label>
-        <button class:active={changedOnly} onclick={() => changedOnly = !changedOnly}>Changed <b>{captured().filter(tx => state(tx) === "Changed").length}</b></button>
-        <button class:active={errorsOnly} onclick={() => errorsOnly = !errorsOnly}>Errors <b>{captured().filter(tx => state(tx) === "Failed").length}</b></button>
-        <div class="toolbar-spacer"></div><button class="icon-button" title="Export redacted capture" onclick={() => void exportCapture()}><Download/></button><input class="hidden" bind:this={importInput} type="file" accept="application/json,.json" onchange={importCapture}/><button class="icon-button" title="Import capture" onclick={() => importInput?.click()}><FolderUp/></button>
+        <button class:active={changedOnly} onclick={() => changedOnly = !changedOnly}>Changed <b>{capturedTransactions.filter(tx => state(tx) === "Changed").length}</b></button>
+        <button class:active={errorsOnly} onclick={() => errorsOnly = !errorsOnly}>Errors <b>{capturedTransactions.filter(tx => state(tx) === "Failed").length}</b></button>
+        <div class="toolbar-spacer"></div><button class="icon-button destructive" title="Delete all captured traffic and diagnostics" aria-label="Delete all captured traffic and diagnostics" onclick={() => void deleteAll()} disabled={busy}><Trash2/></button><button class="icon-button" title="Export redacted capture" onclick={() => void exportCapture()}><Download/></button><input class="hidden" bind:this={importInput} type="file" accept="application/json,.json" onchange={importCapture}/><button class="icon-button" title="Import capture" onclick={() => importInput?.click()}><FolderUp/></button>
       </section>
       <section class="workbench">
-        <div class="request-list"><div class="list-heading"><span>LIVE REQUESTS</span><small>{visible().length} visible</small></div><div class="request-scroll">{#each visible() as tx (tx.id)}<button class:selected={selected()?.id === tx.id} class:failed={state(tx) === "Failed"} class:changed={state(tx) === "Changed"} class="request-row" onclick={() => { selectedId = tx.id; tab = "Overview"; }}><time>{new Date(tx.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><b class="method">{tx.request.method}</b><span class="request-target"><b>{tx.request.host}</b><small>{tx.request.path}</small></span><span>{tx.response?.status ?? "…"}</span><span class="request-state">{state(tx)}</span></button>{/each}{#if !visible().length}<div class="empty-state"><Activity size={28}/><b>No traffic yet</b><span>{capturing ? "Use the selected app and requests will stream in here." : "Start a capture when you are ready."}</span></div>{/if}</div></div>
+        {#key selectedTransaction}
+        <div class="request-list"><div class="list-heading"><span>LIVE REQUESTS</span><small>{visibleTransactions.length} visible</small></div><div class="request-scroll">{#each visibleTransactions as tx (tx.id)}<button class:selected={selectedTransaction?.id === tx.id} class:failed={state(tx) === "Failed"} class:changed={state(tx) === "Changed"} class="request-row" onclick={() => { selectedId = tx.id; tab = "Overview"; }}><time>{new Date(tx.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><b class="method">{tx.request.method}</b><span class="request-target"><b>{tx.request.host}</b><small>{tx.request.path}</small></span><span>{tx.response?.status ?? "…"}</span><span class="request-state">{state(tx)}</span></button>{/each}{#if !visibleTransactions.length}<div class="empty-state"><Activity size={28}/><b>No traffic yet</b><span>{capturing ? "Use the selected app and requests will stream in here." : "Start a capture when you are ready."}</span></div>{/if}</div></div>
         <aside class="inspector">{#if selected()} {@const tx = selected()!}<div class="inspector-heading"><div><span>{tx.request.method}</span><b>{tx.request.host}{tx.request.path}</b></div><button class="icon-button" onclick={() => copy(`${tx.request.scheme}://${tx.request.host}${tx.request.path}`)}><Copy/></button></div><nav class="tabs">{#each ["Overview", "Request", "Response", "Compare", "cURL", "Timeline"] as name}<button class:active={tab === name} onclick={() => tab = name as Tab}>{name}</button>{/each}</nav><div class="detail-panel">{#if tab === "Overview"}<div class="overview-grid"><label>Status<b>{tx.response?.status ?? "Pending"}</b></label><label>Duration<b>{duration(tx) ?? "—"} ms</b></label><label>Content type<b>{tx.response?.content_type || tx.request.content_type || "Unknown"}</b></label><label>Capture quality<b>{tx.capture_quality}</b></label></div>{:else if tab === "Request" || tab === "Response"}{@const message = tab === "Request" ? tx.request : tx.response}<h3>{tab} headers</h3><div class="header-list">{#each message?.headers || [] as header}<div><b>{header.name}</b><span>{header.value}</span></div>{/each}</div><h3>Body</h3><pre>{pretty(body(message?.body))}</pre>{:else if tab === "Compare"}<div class="compare-summary"><div><span>JSON shape comparison</span><b>{tx.comparison ? tx.comparison.compatibility.replaceAll("_", " ") : "Waiting for a comparable response"}</b><small>Scalar values are ignored; only JSON keys, nesting, array item shapes, and types are compared.</small></div><button class="quiet" onclick={() => void approveBaseline(tx)}>Set baseline</button></div>{#if tx.comparison?.differences.length}<div class="difference-list">{#each tx.comparison.differences as difference}<article class:critical={difference.severity === "critical"} class:ignored={difference.ignored}><div><b>{difference.kind.replaceAll("_", " ")}</b><code>{difference.path || "Response"}</code></div><p>{difference.explanation}</p>{#if difference.previous || difference.current}<small><span>Before: {difference.previous || "—"}</span><span>After: {difference.current || "—"}</span></small>{/if}</article>{/each}</div>{:else}<div class="compare-empty"><ShieldCheck/><b>{tx.comparison ? "No JSON-key changes" : "No comparison yet"}</b><span>{tx.comparison ? "This response matches the observed JSON shape." : "Set a baseline or wait for another response to this endpoint."}</span></div>{/if}{:else if tab === "cURL"}<pre>{tx.curl?.multiline || "cURL will be generated once the request is complete."}</pre>{:else}<ol class="timeline"><li>Request started <time>{new Date(tx.timing.request_started_ms).toLocaleTimeString()}</time></li>{#if tx.timing.request_complete_ms}<li>Request sent</li>{/if}{#if tx.timing.response_started_ms}<li>Response headers received</li>{/if}{#if tx.timing.response_complete_ms}<li>Response complete</li>{/if}</ol>{/if}</div>{:else}<div class="empty-state inspector-empty"><ListTree size={30}/><b>Select a request</b><span>Its headers, body and timing will appear here.</span></div>{/if}</aside>
+        {/key}
       </section>
     {:else}
       <section class="hero logs-hero"><div><span>Log inspector</span><h1>Every actionable error, in context.</h1><p>Live diagnostic evidence for <b>{packageName || "your selected package"}</b>.</p></div>{#if !capturing}<button class="primary" onclick={() => void start()}><Play/>Start monitoring</button>{/if}</section>

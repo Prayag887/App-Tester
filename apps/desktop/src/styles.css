@@ -156,3 +156,5 @@ pre{background:#101827;border-color:#2d3850;color:#cbd2e3}
    visible even while Logcat is updating. */
 .issue-expanded-content{position:relative;display:grid!important;flex:0 0 auto!important;gap:15px;margin:-4px 0 4px 155px;padding:16px 17px 17px;border:1px solid #7058a1;border-radius:0 0 11px 11px;background:#18233a;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;visibility:visible!important;opacity:1!important}
 @media(max-width:820px){.issue-expanded-content{margin-left:0}}
+
+.icon-button.destructive{color:#ffadb2;border-color:#704653;background:#302331}.icon-button.destructive:hover{background:#432b39;border-color:#9a5967}

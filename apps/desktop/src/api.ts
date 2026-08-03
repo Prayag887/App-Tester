@@ -27,8 +27,8 @@ export const collectTransactionPages = async (
   }
   return [...transactions.values()];
 };
-export const listTransactions = async ():Promise<HttpTransaction[]> => native()
-  ? collectTransactionPages((limit, offset) => invoke("list_transactions", {limit, offset}))
+export const listTransactions = async (sessionId?: string):Promise<HttpTransaction[]> => native()
+  ? collectTransactionPages((limit, offset) => invoke("list_transactions", {sessionId, limit, offset}))
   : [];
 export const deleteAllTransactions = async ():Promise<void> => invoke("delete_all_transactions");
 export const exportCapture = async ():Promise<string> => invoke("export_capture");
