@@ -5,17 +5,52 @@ import type {
   Environment,
   RetentionPolicy,
   Run,
+  AndroidDevice,
+  AndroidApp,
+  HttpTransaction,
+  LogLine,
+  Diagnostic,
 } from "./types";
 
-const inTauri = () => "__TAURI_INTERNALS__" in window;
+export const isTauri = () => "__TAURI_INTERNALS__" in window;
 
 export async function listCollections(): Promise<Collection[]> {
-  if (!inTauri()) return [];
+  if (!isTauri()) return [];
   return invoke("list_collections");
 }
 
+export const discoverAndroidDevices = (): Promise<AndroidDevice[]> =>
+  isTauri() ? invoke("discover_android_devices") : Promise.resolve([]);
+export const listDebuggableApps = (serial: string): Promise<AndroidApp[]> =>
+  invoke("list_debuggable_apps", { serial });
+export const generateCaptureCa = (): Promise<{
+  path: string;
+  fingerprint_sha256: string;
+}> => invoke("generate_capture_ca");
+export const prepareAndroidCa = (serial: string): Promise<void> =>
+  invoke("prepare_android_ca", { serial });
+export const enableUsbWifi = (serial: string): Promise<string> =>
+  invoke("enable_usb_wifi", { serial });
+export const startCapture = (
+  serial: string,
+  connectionType: string,
+  packageName: string,
+): Promise<string> =>
+  invoke("start_capture", { serial, connectionType, packageName });
+export const stopCapture = (): Promise<void> => invoke("stop_capture");
+export const captureStatus = (): Promise<string> =>
+  isTauri() ? invoke("capture_status") : Promise.resolve("stopped");
+export const captureActive = (): Promise<boolean> =>
+  isTauri() ? invoke("capture_active") : Promise.resolve(false);
+export const captureTransactions = (): Promise<HttpTransaction[]> =>
+  isTauri() ? invoke("capture_transactions") : Promise.resolve([]);
+export const captureLogs = (): Promise<LogLine[]> =>
+  isTauri() ? invoke("capture_logs") : Promise.resolve([]);
+export const captureDiagnostics = (): Promise<Diagnostic[]> =>
+  isTauri() ? invoke("capture_diagnostics") : Promise.resolve([]);
+
 export async function importCollection(source: string): Promise<Collection> {
-  if (!inTauri()) throw new Error("Import is available in the desktop app");
+  if (!isTauri()) throw new Error("Import is available in the desktop app");
   return invoke("import_collection", { source });
 }
 
@@ -50,17 +85,21 @@ export async function runRequest(
 }
 
 export async function listRuns(collectionId?: string): Promise<Run[]> {
-  if (!inTauri()) return [];
+  if (!isTauri()) return [];
   return invoke("list_runs", { collectionId });
 }
 
+export async function getRun(id: string): Promise<Run> {
+  return invoke("get_run", { id });
+}
+
 export async function listEnvironments(): Promise<Environment[]> {
-  if (!inTauri()) return [];
+  if (!isTauri()) return [];
   return invoke("list_environments");
 }
 
 export async function importEnvironment(source: string): Promise<Environment> {
-  if (!inTauri())
+  if (!isTauri())
     throw new Error("Environment import is available in the desktop app");
   return invoke("import_environment", { source });
 }

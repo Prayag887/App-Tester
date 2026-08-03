@@ -58,6 +58,11 @@ pub fn junit_report(run: &Run) -> String {
             )
         })
         .count();
+    let skipped = run
+        .executions
+        .iter()
+        .filter(|execution| execution.state == ExecutionState::Skipped)
+        .count();
     let cases = run
         .executions
         .iter()
@@ -67,36 +72,41 @@ pub fn junit_report(run: &Run) -> String {
                 .as_ref()
                 .map(|response| response.duration_ms as f64 / 1000.0)
                 .unwrap_or_default();
-            let failure = if matches!(execution.state, ExecutionState::Passed) {
-                String::new()
-            } else {
-                let detail = execution
-                    .error
-                    .clone()
-                    .or_else(|| {
-                        execution.comparison.as_ref().map(|comparison| {
-                            format!("{} response differences", comparison.differences.len())
+            let outcome = match execution.state {
+                ExecutionState::Passed => String::new(),
+                ExecutionState::Skipped => "<skipped/>".into(),
+                ExecutionState::Changed
+                | ExecutionState::AssertionFailed
+                | ExecutionState::TransportFailed => {
+                    let detail = execution
+                        .error
+                        .clone()
+                        .or_else(|| {
+                            execution.comparison.as_ref().map(|comparison| {
+                                format!("{} response differences", comparison.differences.len())
+                            })
                         })
-                    })
-                    .unwrap_or_else(|| "assertion failed".into());
-                format!(
-                    "<failure message=\"{}\">{}</failure>",
-                    escape(&detail),
-                    escape(&detail)
-                )
+                        .unwrap_or_else(|| "assertion failed".into());
+                    format!(
+                        "<failure message=\"{}\">{}</failure>",
+                        escape(&detail),
+                        escape(&detail)
+                    )
+                }
             };
             format!(
-                "<testcase classname=\"{}\" name=\"{}\" time=\"{seconds:.3}\">{failure}</testcase>",
+                "<testcase classname=\"{}\" name=\"{}\" time=\"{seconds:.3}\">{outcome}</testcase>",
                 escape(&run.collection_name),
                 escape(&execution.request_name)
             )
         })
         .collect::<String>();
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuite name=\"{}\" tests=\"{}\" failures=\"{}\">{}</testsuite>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuite name=\"{}\" tests=\"{}\" failures=\"{}\" skipped=\"{}\">{}</testsuite>",
         escape(&run.collection_name),
         run.executions.len(),
         failures,
+        skipped,
         cases
     )
 }
@@ -113,7 +123,7 @@ fn escape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RunState;
+    use crate::{RequestExecution, RunState};
     use chrono::Utc;
 
     #[test]
@@ -132,5 +142,55 @@ mod tests {
         };
         assert!(html_report(&run).contains("&lt;Demo&gt;"));
         assert!(junit_report(&run).contains("&lt;Demo&gt;"));
+    }
+
+    #[test]
+    fn junit_classifies_failures_and_skips_consistently() {
+        let mut run = empty_run();
+        run.executions = vec![
+            execution("passed", ExecutionState::Passed),
+            execution("changed", ExecutionState::Changed),
+            execution("assertion", ExecutionState::AssertionFailed),
+            execution("transport", ExecutionState::TransportFailed),
+            execution("skipped", ExecutionState::Skipped),
+        ];
+
+        let report = junit_report(&run);
+
+        assert!(report.contains("tests=\"5\" failures=\"3\" skipped=\"1\""));
+        assert_eq!(report.matches("<failure ").count(), 3);
+        assert_eq!(report.matches("<skipped/>").count(), 1);
+        assert!(report.contains("name=\"skipped\" time=\"0.000\"><skipped/>"));
+    }
+
+    fn empty_run() -> Run {
+        Run {
+            id: "r1".into(),
+            collection_id: "c1".into(),
+            collection_name: "Demo".into(),
+            environment_name: None,
+            started_at: Utc::now(),
+            completed_at: Some(Utc::now()),
+            state: RunState::Completed,
+            baseline_run_id: None,
+            executions: vec![],
+            pinned: false,
+        }
+    }
+
+    fn execution(name: &str, state: ExecutionState) -> RequestExecution {
+        RequestExecution {
+            id: name.into(),
+            run_id: "r1".into(),
+            request_id: name.into(),
+            request_name: name.into(),
+            state,
+            started_at: Utc::now(),
+            response: None,
+            error: None,
+            comparison: None,
+            assertions: vec![],
+            extractions: vec![],
+        }
     }
 }

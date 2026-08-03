@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { layout, prepare } from "@chenglou/pretext";
 import {
   Activity,
   AlertTriangle,
   Check,
   ChevronDown,
   ChevronRight,
-  Copy,
   Database,
   Download,
   FileDiff,
@@ -26,6 +24,7 @@ import {
 } from "lucide-react";
 import {
   exportWorkspaceFile,
+  getRun,
   importCollection,
   importEnvironment,
   importWorkspace,
@@ -49,8 +48,10 @@ import type {
   RetentionPolicy,
   Run,
 } from "./types";
+import { ApiHitsView } from "./ApiHitsView";
+import { IssueTriageView } from "./IssueTriageView";
 
-type View = "collections" | "history" | "regressions";
+type View = "collections" | "hits" | "issues" | "history";
 
 const methodClass = (method: string) => `method method-${method.toLowerCase()}`;
 
@@ -82,6 +83,7 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string>();
   const [editingRequest, setEditingRequest] = useState<ApiRequest>();
+  const [openRequests, setOpenRequests] = useState<ApiRequest[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [environmentsOpen, setEnvironmentsOpen] = useState(false);
@@ -91,7 +93,10 @@ export function App() {
   const workspaceFileRef = useRef<HTMLInputElement>(null);
 
   const collection = collections.find((item) => item.id === selected);
-  const collectionRuns = runs.filter((run) => run.collection_id === selected);
+  const collectionRuns = useMemo(
+    () => runs.filter((run) => run.collection_id === selected),
+    [runs, selected],
+  );
 
   async function refresh(preferred?: string) {
     const [nextCollections, nextRuns, nextEnvironments] = await Promise.all([
@@ -111,9 +116,32 @@ export function App() {
       return;
     }
     if (editingRequest?.collection_id !== collection.id) {
-      setEditingRequest(collection.requests[0]);
+      openRequest(collection.requests[0]);
     }
   }, [collection?.id]);
+
+  function openRequest(request?: ApiRequest) {
+    setEditingRequest(request);
+    if (!request) return;
+    setOpenRequests((current) => {
+      const index = current.findIndex((item) => item.id === request.id);
+      if (index < 0) return [...current, request];
+      const next = [...current];
+      next[index] = request;
+      return next;
+    });
+  }
+
+  function closeRequestTab(requestId: string) {
+    setOpenRequests((current) => {
+      const index = current.findIndex((item) => item.id === requestId);
+      const next = current.filter((item) => item.id !== requestId);
+      if (editingRequest?.id === requestId) {
+        setEditingRequest(next[index] ?? next[index - 1]);
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     refresh().catch((reason) => setError(String(reason)));
@@ -151,6 +179,30 @@ export function App() {
       setError(String(reason));
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function openRun(summary: Run) {
+    setError(undefined);
+    try {
+      const run = await getRun(summary.id);
+      setActiveRun(run);
+      setActiveExecution(undefined);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }
+
+  async function inspectIssue(run: Run, execution: Execution) {
+    setError(undefined);
+    try {
+      const detailed = await getRun(run.id);
+      setActiveRun(detailed);
+      setActiveExecution(
+        detailed.executions.find((item) => item.id === execution.id),
+      );
+    } catch (reason) {
+      setError(String(reason));
     }
   }
 
@@ -211,7 +263,7 @@ export function App() {
   function newRequest(target = collection) {
     if (!target) return;
     setSelected(target.id);
-    setEditingRequest({
+    openRequest({
       id: crypto.randomUUID(),
       collection_id: target.id,
       folder_path: [],
@@ -261,6 +313,9 @@ export function App() {
       current.map((item) => (item.id === next.id ? next : item)),
     );
     setEditingRequest(request);
+    setOpenRequests((current) =>
+      current.map((item) => (item.id === request.id ? request : item)),
+    );
   }
 
   async function deleteRequest(request: ApiRequest) {
@@ -293,7 +348,7 @@ export function App() {
   }, [activeRun]);
 
   return (
-    <div className="shell">
+    <div className={`shell app-shell screen-${view}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -305,9 +360,25 @@ export function App() {
         <nav>
           <Nav
             icon={<FolderOpen />}
-            label="Collections"
+            label="Workspace"
             active={view === "collections"}
             onClick={() => setView("collections")}
+          />
+          <Nav
+            icon={<Activity />}
+            label="API Hits"
+            active={view === "hits"}
+            onClick={() => setView("hits")}
+          />
+          <Nav
+            icon={<FileDiff />}
+            label="Issues"
+            active={view === "issues"}
+            onClick={() => setView("issues")}
+            badge={
+              runs.filter((run) => run.state === "completed_with_findings")
+                .length
+            }
           />
           <Nav
             icon={<History />}
@@ -315,70 +386,64 @@ export function App() {
             active={view === "history"}
             onClick={() => setView("history")}
           />
-          <Nav
-            icon={<FileDiff />}
-            label="Regressions"
-            active={view === "regressions"}
-            onClick={() => setView("regressions")}
-            badge={
-              runs.filter((run) => run.state === "completed_with_findings")
-                .length
-            }
-          />
         </nav>
-        <div className="sidebar-section-label">COLLECTIONS</div>
-        <div className="collection-list">
-          {collections.map((item) => (
-            <div className="collection-tree" key={item.id}>
-              <button
-                className={`collection-item ${selected === item.id ? "active" : ""}`}
-                onClick={() => {
-                  setSelected(item.id);
-                  setEditingRequest(item.requests[0]);
-                  setActiveRun(undefined);
-                  setActiveExecution(undefined);
-                }}
-              >
-                {selected === item.id ? <ChevronDown /> : <ChevronRight />}
-                <FolderOpen />
-                <span>{item.name}</span>
-                <small>{item.requests.length}</small>
-              </button>
-              <button
-                className="collection-add"
-                title="Add request"
-                aria-label={`Add request to ${item.name}`}
-                onClick={() => newRequest(item)}
-              >
-                <Plus />
-              </button>
-              {selected === item.id && view === "collections" && (
-                <div className="request-tree">
-                  <CollectionRequestTree
-                    requests={item.requests}
-                    activeId={editingRequest?.id}
-                    onSelect={(request) => {
-                      setEditingRequest(request);
+        {view === "collections" && (
+          <>
+            <div className="sidebar-section-label">COLLECTIONS</div>
+            <div className="collection-list">
+              {collections.map((item) => (
+                <div className="collection-tree" key={item.id}>
+                  <button
+                    className={`collection-item ${selected === item.id ? "active" : ""}`}
+                    onClick={() => {
+                      setSelected(item.id);
+                      openRequest(item.requests[0]);
                       setActiveRun(undefined);
+                      setActiveExecution(undefined);
                     }}
-                    onDelete={(request) => {
-                      setRequestToDelete(request);
-                    }}
-                  />
-                  <button className="tree-new" onClick={() => newRequest()}>
-                    <Plus /> <span>Add request</span>
+                  >
+                    {selected === item.id ? <ChevronDown /> : <ChevronRight />}
+                    <FolderOpen />
+                    <span>{item.name}</span>
+                    <small>{item.requests.length}</small>
                   </button>
+                  <button
+                    className="collection-add"
+                    title="Add request"
+                    aria-label={`Add request to ${item.name}`}
+                    onClick={() => newRequest(item)}
+                  >
+                    <Plus />
+                  </button>
+                  {selected === item.id && view === "collections" && (
+                    <div className="request-tree">
+                      <CollectionRequestTree
+                        requests={item.requests}
+                        activeId={editingRequest?.id}
+                        onSelect={(request) => {
+                          openRequest(request);
+                          setActiveRun(undefined);
+                        }}
+                        onDelete={(request) => {
+                          setRequestToDelete(request);
+                        }}
+                      />
+                      <button className="tree-new" onClick={() => newRequest()}>
+                        <Plus /> <span>Add request</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
+              ))}
             </div>
-          ))}
-        </div>
-        <button
-          className="import-side"
-          onClick={() => fileRef.current?.click()}
-        >
-          <Import size={16} /> Import Postman
-        </button>
+            <button
+              className="import-side"
+              onClick={() => fileRef.current?.click()}
+            >
+              <Import size={16} /> Import Postman
+            </button>
+          </>
+        )}
         <button
           className="sidebar-footer"
           onClick={() => setSettingsOpen(true)}
@@ -401,38 +466,56 @@ export function App() {
             )}
           </div>
           <div className="top-actions">
-            <button className="icon-button" aria-label="Search">
-              <Search />
-            </button>
-            <select
-              className="environment"
-              value={environmentId ?? ""}
-              onChange={(event) => {
-                if (event.target.value === "__import") {
-                  environmentFileRef.current?.click();
-                } else {
-                  setEnvironmentId(event.target.value || undefined);
-                }
-              }}
-              aria-label="Active environment"
-            >
-              <option value="">No environment</option>
-              {environments.map((environment) => (
-                <option key={environment.id} value={environment.id}>
-                  {environment.name}
-                </option>
-              ))}
-              <option value="__import">Import environment…</option>
-            </select>
-            <button
-              className="environment-button"
-              onClick={() => setEnvironmentsOpen(true)}
-            >
-              Variables
-            </button>
-            <button className="share-button" onClick={() => setShareOpen(true)}>
-              <Share2 /> Share workspace
-            </button>
+            {view === "collections" && (
+              <>
+                <button className="icon-button" aria-label="Search">
+                  <Search />
+                </button>
+                <div
+                  className="environment-switcher"
+                  aria-label="Environment switcher"
+                >
+                  <button
+                    className={!environmentId ? "active" : ""}
+                    onClick={() => setEnvironmentId(undefined)}
+                  >
+                    No environment
+                  </button>
+                  {environments.map((environment) => (
+                    <button
+                      key={environment.id}
+                      className={
+                        environmentId === environment.id ? "active" : ""
+                      }
+                      onClick={() => setEnvironmentId(environment.id)}
+                      title={`Use ${environment.name}`}
+                    >
+                      {environment.name}
+                    </button>
+                  ))}
+                  <button
+                    className="environment-import-shortcut"
+                    onClick={() => environmentFileRef.current?.click()}
+                    title="Import environment"
+                    aria-label="Import environment"
+                  >
+                    <Plus />
+                  </button>
+                </div>
+                <button
+                  className="environment-button"
+                  onClick={() => setEnvironmentsOpen(true)}
+                >
+                  Variables
+                </button>
+                <button
+                  className="share-button"
+                  onClick={() => setShareOpen(true)}
+                >
+                  <Share2 /> Share workspace
+                </button>
+              </>
+            )}
           </div>
         </header>
 
@@ -443,7 +526,16 @@ export function App() {
             <button onClick={() => setError(undefined)}>Dismiss</button>
           </div>
         )}
-        {!collections.length ? (
+        {view === "hits" ? (
+          <ApiHitsView onError={setError} />
+        ) : view === "issues" ? (
+          <IssueTriageView
+            runs={runs}
+            activeRun={activeRun}
+            activeExecution={activeExecution}
+            onInspect={(run, execution) => void inspectIssue(run, execution)}
+          />
+        ) : !collections.length ? (
           <EmptyState onImport={() => fileRef.current?.click()} />
         ) : view === "collections" ? (
           <CollectionView
@@ -459,7 +551,7 @@ export function App() {
                 return undefined;
               })
             }
-            onOpenRun={setActiveRun}
+            onOpenRun={(run) => void openRun(run)}
             activeExecution={activeExecution}
             onExecution={setActiveExecution}
             onNewRequest={() => newRequest()}
@@ -470,17 +562,19 @@ export function App() {
               )
             }
             onDeleteRequest={(request) => setRequestToDelete(request)}
+            openRequests={openRequests.filter(
+              (request) => request.collection_id === collection?.id,
+            )}
+            onSelectRequest={openRequest}
+            onCloseRequest={closeRequestTab}
+            environment={environments.find((item) => item.id === environmentId)}
           />
         ) : (
           <RunsView
-            runs={
-              view === "regressions"
-                ? runs.filter((run) => run.state === "completed_with_findings")
-                : runs
-            }
+            runs={runs}
             onOpen={(run) => {
               setSelected(run.collection_id);
-              setActiveRun(run);
+              void openRun(run);
               setView("collections");
             }}
           />
@@ -499,6 +593,9 @@ export function App() {
         hidden
         accept="application/json,.json"
         onChange={(event) => onEnvironmentImport(event.target.files?.[0])}
+        onClick={(event) => {
+          event.currentTarget.value = "";
+        }}
       />
       <input
         ref={workspaceFileRef}
@@ -530,11 +627,14 @@ export function App() {
           activeId={environmentId}
           onSelect={setEnvironmentId}
           onImport={() => environmentFileRef.current?.click()}
-          onSaveEnvironment={(environment) =>
-            persistEnvironment(environment).catch((reason) =>
-              setError(String(reason)),
-            )
-          }
+          onSaveEnvironment={async (environment) => {
+            try {
+              await persistEnvironment(environment);
+            } catch (reason) {
+              setError(String(reason));
+              throw reason;
+            }
+          }}
           onSaveCollectionVariables={(variables) =>
             persistCollectionVariables(variables).catch((reason) =>
               setError(String(reason)),
@@ -786,6 +886,10 @@ function CollectionView({
   request,
   onSaveRequest,
   onDeleteRequest,
+  openRequests,
+  onSelectRequest,
+  onCloseRequest,
+  environment,
 }: {
   collection?: Collection;
   runs: Run[];
@@ -801,6 +905,10 @@ function CollectionView({
   request?: ApiRequest;
   onSaveRequest: (request: ApiRequest) => Promise<void>;
   onDeleteRequest: (request: ApiRequest) => void;
+  openRequests: ApiRequest[];
+  onSelectRequest: (request: ApiRequest) => void;
+  onCloseRequest: (requestId: string) => void;
+  environment?: Environment;
 }) {
   if (!collection) return null;
   if (activeRun) {
@@ -827,6 +935,10 @@ function CollectionView({
       onNewRequest={onNewRequest}
       onSave={onSaveRequest}
       onDelete={onDeleteRequest}
+      openRequests={openRequests}
+      onSelectRequest={onSelectRequest}
+      onCloseRequest={onCloseRequest}
+      environment={environment}
     />
   );
 }
@@ -851,6 +963,10 @@ function RequestWorkspace({
   onNewRequest,
   onSave,
   onDelete,
+  openRequests,
+  onSelectRequest,
+  onCloseRequest,
+  environment,
 }: {
   collection: Collection;
   request?: ApiRequest;
@@ -862,10 +978,13 @@ function RequestWorkspace({
   onNewRequest: () => void;
   onSave: (request: ApiRequest) => Promise<void>;
   onDelete: (request: ApiRequest) => void;
+  openRequests: ApiRequest[];
+  onSelectRequest: (request: ApiRequest) => void;
+  onCloseRequest: (requestId: string) => void;
+  environment?: Environment;
 }) {
   const [draft, setDraft] = useState(request);
   const [tab, setTab] = useState<RequestTab>("params");
-  const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
   const [response, setResponse] = useState<Execution>();
   const [curlPasteError, setCurlPasteError] = useState<string>();
@@ -874,7 +993,6 @@ function RequestWorkspace({
     setResponse(undefined);
     setCurlPasteError(undefined);
   }, [request?.id]);
-  const curl = useMemo(() => (draft ? requestToCurl(draft) : ""), [draft]);
   const persisted =
     !!draft && collection.requests.some((item) => item.id === draft.id);
   const dirty =
@@ -914,16 +1032,37 @@ function RequestWorkspace({
     <div className="request-workspace">
       <section className="request-main">
         <div className="request-tabbar">
-          <div className="request-tab active">
-            <span className={methodClass(draft.method)}>{draft.method}</span>
-            <input
-              aria-label="Request name"
-              value={draft.name}
-              onChange={(event) =>
-                setDraft({ ...draft, name: event.target.value })
-              }
-            />
-            {dirty && <i title="Unsaved changes" />}
+          <div className="open-request-tabs" role="tablist">
+            {openRequests.map((openRequest) => (
+              <button
+                key={openRequest.id}
+                role="tab"
+                aria-selected={openRequest.id === draft.id}
+                className={`request-tab ${openRequest.id === draft.id ? "active" : ""}`}
+                onClick={() => onSelectRequest(openRequest)}
+              >
+                <span className={methodClass(openRequest.method)}>
+                  {openRequest.method}
+                </span>
+                <span className="open-tab-name">
+                  {openRequest.id === draft.id ? draft.name : openRequest.name}
+                </span>
+                {openRequest.id === draft.id && dirty && (
+                  <i title="Unsaved changes" />
+                )}
+                <span
+                  className="tab-close"
+                  role="button"
+                  aria-label={`Close ${openRequest.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloseRequest(openRequest.id);
+                  }}
+                >
+                  <X />
+                </span>
+              </button>
+            ))}
           </div>
           <button
             className="tab-add"
@@ -959,9 +1098,15 @@ function RequestWorkspace({
                 <ChevronRight /> {folder}
               </span>
             ))}
-            <strong>
-              <ChevronRight /> {draft.name}
-            </strong>
+            <ChevronRight />
+            <input
+              className="request-name-input"
+              aria-label="Request name"
+              value={draft.name}
+              onChange={(event) =>
+                setDraft({ ...draft, name: event.target.value })
+              }
+            />
           </div>
           <button
             className="context-save"
@@ -1006,21 +1151,12 @@ function RequestWorkspace({
                 ),
               )}
             </select>
-            <input
+            <VariableUrlField
               value={draft.url}
-              onChange={(event) =>
-                setDraft({ ...draft, url: event.target.value })
-              }
-              aria-label="Request URL"
-              placeholder="Enter a URL or paste a complete cURL command"
-              onPaste={(event) => {
-                const source = event.clipboardData.getData("text").trim();
-                if (/^(?:\$\s*)?curl(?:\s|$)/i.test(source)) {
-                  event.preventDefault();
-                  applyPastedCurl(source.replace(/^\$\s*/, ""));
-                }
-              }}
-              spellCheck={false}
+              onChange={(url) => setDraft({ ...draft, url })}
+              collectionVariables={collection.variables}
+              environmentVariables={environment?.variables ?? []}
+              onCurlPaste={applyPastedCurl}
             />
             <button className="primary send" type="submit" disabled={sending}>
               <Play /> {sending ? "Sending…" : "Send"}
@@ -1214,32 +1350,83 @@ function RequestWorkspace({
           )}
         </div>
       </section>
+    </div>
+  );
+}
 
-      <aside className="code-sidebar">
-        <div className="code-head">
-          <div>
-            <span>Code snippet</span>
-            <strong>cURL</strong>
-          </div>
-          <button
-            onClick={async () => {
-              await navigator.clipboard.writeText(curl);
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
-            }}
-          >
-            {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}
-          </button>
+export function variablesIn(source: string): string[] {
+  return [...source.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((match) =>
+    match[1].trim(),
+  );
+}
+
+function VariableUrlField({
+  value,
+  onChange,
+  collectionVariables,
+  environmentVariables,
+  onCurlPaste,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  collectionVariables: Collection["variables"];
+  environmentVariables: Environment["variables"];
+  onCurlPaste: (source: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [focused, setFocused] = useState(false);
+  const values = new Map<string, string>();
+  for (const variable of [...collectionVariables, ...environmentVariables]) {
+    if (variable.enabled) values.set(variable.key, variable.value);
+  }
+  const parts = value.split(/(\{\{\s*[^{}]+?\s*\}\})/g);
+  return (
+    <div
+      className={`variable-url-field ${focused ? "editing" : ""}`}
+      onClick={() => inputRef.current?.focus()}
+    >
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        aria-label="Request URL"
+        placeholder="Enter a URL or paste a complete cURL command"
+        onPaste={(event) => {
+          const source = event.clipboardData.getData("text").trim();
+          if (/^(?:\$\s*)?curl(?:\s|$)/i.test(source)) {
+            event.preventDefault();
+            onCurlPaste(source.replace(/^\$\s*/, ""));
+          }
+        }}
+        spellCheck={false}
+      />
+      {!focused && value && (
+        <div className="variable-url-display" aria-hidden="true">
+          {parts.map((part, index) => {
+            const match = part.match(/^\{\{\s*([^{}]+?)\s*\}\}$/);
+            if (!match) return <span key={index}>{part}</span>;
+            const name = match[1].trim();
+            const resolved = values.get(name);
+            return (
+              <span
+                className={`inline-variable ${resolved === undefined ? "unresolved" : ""}`}
+                key={index}
+              >
+                {part}
+                <span className="variable-tooltip" role="tooltip">
+                  <strong>{name}</strong>
+                  <code>
+                    {resolved ??
+                      "Not defined in the active environment or collection"}
+                  </code>
+                </span>
+              </span>
+            );
+          })}
         </div>
-        <PretextCode>{curl}</PretextCode>
-        <div className="code-note">
-          <strong>Ready for your terminal</strong>
-          <p>
-            Variables stay in Postman format so you can see exactly what will be
-            substituted at run time.
-          </p>
-        </div>
-      </aside>
+      )}
     </div>
   );
 }
@@ -1402,75 +1589,8 @@ function AuthorizationEditor({
   );
 }
 
-function PretextCode({ children }: { children: string }) {
-  const ref = useRef<HTMLPreElement>(null);
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    let prepared = prepare(children, "10px ui-monospace");
-    const relayout = () => {
-      const result = layout(
-        prepared,
-        Math.max(100, element.clientWidth - 34),
-        17.5,
-      );
-      element.style.minHeight = `${Math.max(260, result.height + 34)}px`;
-    };
-    prepared = prepare(children, getComputedStyle(element).font);
-    const observer = new ResizeObserver(relayout);
-    observer.observe(element);
-    relayout();
-    return () => observer.disconnect();
-  }, [children]);
-  return <pre ref={ref}>{children}</pre>;
-}
-
 function enabledCount(rows: ApiRequest["headers"]) {
   return rows.filter((row) => row.enabled).length;
-}
-
-function shellQuote(value: string) {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
-
-function requestToCurl(request: ApiRequest) {
-  const query = request.query
-    .filter((row) => row.enabled && row.key)
-    .map(
-      (row) =>
-        `${encodeURIComponent(row.key)}=${encodeURIComponent(row.value)}`,
-    )
-    .join("&");
-  const url =
-    request.url +
-    (query ? `${request.url.includes("?") ? "&" : "?"}${query}` : "");
-  const lines = [
-    `curl --request ${request.method} \\`,
-    `  --url ${shellQuote(url)}`,
-  ];
-  for (const header of request.headers.filter(
-    (row) => row.enabled && row.key,
-  )) {
-    lines[lines.length - 1] += " \\";
-    lines.push(`  --header ${shellQuote(`${header.key}: ${header.value}`)}`);
-  }
-  if (request.auth.type === "bearer" && request.auth.token) {
-    lines[lines.length - 1] += " \\";
-    lines.push(
-      `  --header ${shellQuote(`Authorization: Bearer ${String(request.auth.token)}`)}`,
-    );
-  }
-  if (request.auth.type === "basic") {
-    lines[lines.length - 1] += " \\";
-    lines.push(
-      `  --user ${shellQuote(`${String(request.auth.username ?? "")}:${String(request.auth.password ?? "")}`)}`,
-    );
-  }
-  if (request.body_kind !== "none" && request.body) {
-    lines[lines.length - 1] += " \\";
-    lines.push(`  --data-raw ${shellQuote(request.body)}`);
-  }
-  return lines.join("\n");
 }
 
 function RunReport({
@@ -1724,8 +1844,10 @@ function EnvironmentDialog({
   activeId?: string;
   onSelect: (id?: string) => void;
   onImport: () => void;
-  onSaveEnvironment: (environment: Environment) => void;
-  onSaveCollectionVariables: (variables: Collection["variables"]) => void;
+  onSaveEnvironment: (environment: Environment) => Promise<void>;
+  onSaveCollectionVariables: (
+    variables: Collection["variables"],
+  ) => Promise<void>;
   onClose: () => void;
 }) {
   const [scope, setScope] = useState<"environment" | "collection">(
@@ -1737,6 +1859,8 @@ function EnvironmentDialog({
   const [collectionVariables, setCollectionVariables] = useState(
     collection?.variables ?? [],
   );
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   useEffect(() => setDraft(selected), [selected?.id]);
   useEffect(
     () => setCollectionVariables(collection?.variables ?? []),
@@ -1824,9 +1948,22 @@ function EnvironmentDialog({
               <button
                 className="primary"
                 disabled={!draft}
-                onClick={() => draft && onSaveEnvironment(draft)}
+                onClick={async () => {
+                  if (!draft) return;
+                  setSaving(true);
+                  setSaved(false);
+                  try {
+                    await onSaveEnvironment(draft);
+                    setSaved(true);
+                  } catch {
+                    setSaved(false);
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
               >
-                <Save /> Save environment
+                {saved ? <Check /> : <Save />}{" "}
+                {saving ? "Saving…" : saved ? "Saved" : "Save environment"}
               </button>
             </div>
           </>
@@ -2234,10 +2371,14 @@ function Stat({
 }
 function labelFor(view: View) {
   return view === "collections"
-    ? "Collections"
-    : view === "history"
-      ? "History"
-      : "Regressions";
+    ? "Workspace"
+    : view === "hits"
+      ? "API Hits"
+      : view === "issues"
+        ? "Issues"
+        : view === "history"
+          ? "History"
+          : "";
 }
 function prettyBody(body: string) {
   try {

@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
             let path = args.get(1).context("missing Postman collection path")?;
             let source = fs::read_to_string(path).with_context(|| format!("read {path}"))?;
             let collection = import_postman(&source)?;
-            engine.store.save_collection(&collection)?;
+            engine.save_collection(&collection)?;
             println!(
                 "Imported {} ({} requests, {} warnings)",
                 collection.name,
@@ -34,19 +34,17 @@ async fn main() -> Result<()> {
             let path = args.get(1).context("missing Postman environment path")?;
             let source = fs::read_to_string(path).with_context(|| format!("read {path}"))?;
             let environment = import_postman_environment(&source)?;
-            engine.store.save_environment(&environment)?;
+            engine.save_environment(&environment)?;
             println!("Imported environment {}", environment.name);
         }
         Some("run") => {
             let collection_id = args.get(1).context("missing collection ID")?;
             let collection = engine
-                .store
                 .collection(collection_id)?
                 .context("collection not found")?;
             let environment = flag_value(&args, "--environment")
                 .map(|id| {
                     engine
-                        .store
                         .environments()
                         .map(|items| items.into_iter().find(|item| item.id == id))
                 })
@@ -90,33 +88,30 @@ async fn main() -> Result<()> {
                 std::process::exit(2);
             }
         }
-        Some("collections") => println!(
-            "{}",
-            serde_json::to_string_pretty(&engine.store.collections()?)?
-        ),
-        Some("environments") => println!(
-            "{}",
-            serde_json::to_string_pretty(&engine.store.environments()?)?
-        ),
+        Some("collections") => {
+            println!("{}", serde_json::to_string_pretty(&engine.collections()?)?)
+        }
+        Some("environments") => {
+            println!("{}", serde_json::to_string_pretty(&engine.environments()?)?)
+        }
         Some("history") => println!(
             "{}",
-            serde_json::to_string_pretty(&engine.store.runs(args.get(1).map(String::as_str))?)?
+            serde_json::to_string_pretty(&engine.runs(args.get(1).map(String::as_str))?)?
         ),
         Some("retention-clean") => {
-            let policy = engine.store.retention_policy()?;
+            let policy = engine.retention_policy()?;
             println!(
                 "{}",
-                serde_json::to_string_pretty(&engine.store.cleanup_history(&policy)?)?
+                serde_json::to_string_pretty(&engine.cleanup_history(&policy)?)?
             );
         }
         Some("export-project") => {
             let collection_id = args.get(1).context("missing collection ID")?;
             let output = args.get(2).context("missing output .apiqa path")?;
             let collection = engine
-                .store
                 .collection(collection_id)?
                 .context("collection not found")?;
-            let source = export_project(&collection, &engine.store.environments()?)?;
+            let source = export_project(&collection, &engine.environments()?)?;
             fs::write(output, source).with_context(|| format!("write {output}"))?;
             println!(
                 "Exported {} to {} (secret environment values omitted)",
@@ -127,10 +122,7 @@ async fn main() -> Result<()> {
             let path = args.get(1).context("missing .apiqa project path")?;
             let source = fs::read_to_string(path).with_context(|| format!("read {path}"))?;
             let bundle = import_project(&source)?;
-            engine.store.save_collection(&bundle.collection)?;
-            for environment in &bundle.environments {
-                engine.store.save_environment(environment)?;
-            }
+            engine.save_project(&bundle.collection, &bundle.environments)?;
             println!(
                 "Imported {} ({} environments)",
                 bundle.collection.name,
@@ -141,9 +133,9 @@ async fn main() -> Result<()> {
             println!("APIQA {}", env!("CARGO_PKG_VERSION"));
             println!("platform: {}-{}", env::consts::OS, env::consts::ARCH);
             println!("data directory: {}", data_dir.display());
-            println!("collections: {}", engine.store.collections()?.len());
-            println!("environments: {}", engine.store.environments()?.len());
-            println!("runs: {}", engine.store.runs(None)?.len());
+            println!("collections: {}", engine.collections()?.len());
+            println!("environments: {}", engine.environments()?.len());
+            println!("runs: {}", engine.run_count()?);
             println!("database integrity: ok");
         }
         _ => bail!(

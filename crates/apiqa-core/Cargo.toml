@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+http-body-util.workspace = true
+hudsucker.workspace = true
 reqwest.workspace = true
 regex.workspace = true
 rusqlite.workspace = true

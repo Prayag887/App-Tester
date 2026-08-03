@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde_json::Value;
 
@@ -74,29 +74,44 @@ fn compare_headers(
     options: &ComparisonOptions,
     differences: &mut Vec<Difference>,
 ) {
+    let ignored_headers = options
+        .ignored_headers
+        .iter()
+        .map(|header| header.trim().to_ascii_lowercase())
+        .collect::<HashSet<_>>();
     let normalize = |headers: &[crate::KeyValue]| {
-        headers
-            .iter()
-            .filter(|header| {
-                !options
-                    .ignored_headers
-                    .contains(&header.key.to_ascii_lowercase())
-            })
-            .map(|header| (header.key.to_ascii_lowercase(), header.value.clone()))
-            .collect::<BTreeMap<_, _>>()
+        let mut normalized = BTreeMap::<String, Vec<String>>::new();
+        for header in headers {
+            let key = header.key.trim().to_ascii_lowercase();
+            if !ignored_headers.contains(&key) {
+                normalized
+                    .entry(key)
+                    .or_default()
+                    .push(header.value.clone());
+            }
+        }
+        normalized
     };
     let left = normalize(&baseline.headers);
     let right = normalize(&current.headers);
-    for key in left.keys().chain(right.keys()).collect::<HashSet<_>>() {
+    for key in left.keys().chain(right.keys()).collect::<BTreeSet<_>>() {
         if left.get(key) != right.get(key) {
             differences.push(Difference {
                 kind: DifferenceKind::Header,
                 path: format!("$headers.{key}"),
-                baseline: left.get(key).cloned().map(Value::String),
-                current: right.get(key).cloned().map(Value::String),
+                baseline: left.get(key).map(|values| header_values(values)),
+                current: right.get(key).map(|values| header_values(values)),
                 message: format!("Header {key} changed"),
             });
         }
+    }
+}
+
+fn header_values(values: &[String]) -> Value {
+    if values.len() == 1 {
+        Value::String(values[0].clone())
+    } else {
+        Value::Array(values.iter().cloned().map(Value::String).collect())
     }
 }
 
@@ -112,7 +127,7 @@ fn compare_json(
     }
     match (baseline, current) {
         (Value::Object(left), Value::Object(right)) => {
-            let keys = left.keys().chain(right.keys()).collect::<HashSet<_>>();
+            let keys = left.keys().chain(right.keys()).collect::<BTreeSet<_>>();
             for key in keys {
                 let child = format!("{path}.{key}");
                 match (left.get(key), right.get(key)) {
@@ -182,6 +197,14 @@ fn compare_json(
 mod tests {
     use super::*;
 
+    fn header(key: &str, value: &str) -> crate::KeyValue {
+        crate::KeyValue {
+            key: key.into(),
+            value: value.into(),
+            enabled: true,
+        }
+    }
+
     fn response(body: &str) -> ResponseSnapshot {
         ResponseSnapshot {
             status: 200,
@@ -213,5 +236,58 @@ mod tests {
             &ComparisonOptions::default(),
         );
         assert_eq!(result.differences[0].path, "$.user.name");
+    }
+
+    #[test]
+    fn preserves_repeated_headers_and_normalizes_ignored_names() {
+        let mut baseline = response("{}");
+        baseline.headers = vec![
+            header("Set-Cookie", "a=1"),
+            header("set-cookie", "b=2"),
+            header("X-Request-Id", "old"),
+        ];
+        let mut current = response("{}");
+        current.headers = vec![
+            header("SET-COOKIE", "a=1"),
+            header("Set-Cookie", "b=3"),
+            header("x-request-id", "new"),
+        ];
+        let options = ComparisonOptions {
+            ignored_headers: HashSet::from([" X-REQUEST-ID ".into()]),
+            ..ComparisonOptions::default()
+        };
+
+        let result = compare_responses(&baseline, &current, &options);
+
+        assert_eq!(result.differences.len(), 1);
+        assert_eq!(result.differences[0].path, "$headers.set-cookie");
+        assert_eq!(
+            result.differences[0].baseline,
+            Some(serde_json::json!(["a=1", "b=2"]))
+        );
+        assert_eq!(
+            result.differences[0].current,
+            Some(serde_json::json!(["a=1", "b=3"]))
+        );
+    }
+
+    #[test]
+    fn reports_differences_in_deterministic_order() {
+        let mut baseline = response(r#"{"z":1,"a":1}"#);
+        baseline.headers = vec![header("Z-Header", "old")];
+        let mut current = response(r#"{"z":2,"a":2}"#);
+        current.headers = vec![header("Z-Header", "new"), header("A-Header", "added")];
+
+        let result = compare_responses(&baseline, &current, &ComparisonOptions::default());
+        let paths = result
+            .differences
+            .iter()
+            .map(|difference| difference.path.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            paths,
+            ["$headers.a-header", "$headers.z-header", "$.a", "$.z"]
+        );
     }
 }

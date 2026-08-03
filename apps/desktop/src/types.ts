@@ -84,3 +84,49 @@ export interface CleanupResult {
   deleted_blobs: number;
   reclaimed_bytes: number;
 }
+export interface AndroidDevice {
+  serial: string;
+  connection_type: "usb" | "wireless" | "emulator";
+  authorization_status: string;
+  model?: string;
+  android_version?: string;
+  api_level?: number;
+}
+export interface AndroidApp {
+  package_name: string;
+  version_name?: string;
+  debuggable: boolean;
+}
+export interface CapturedBody {
+  text: string;
+  original_size: number;
+  truncated: boolean;
+}
+export interface HttpTransaction {
+  id: string;
+  started_at_ms: number;
+  request: {
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    body: CapturedBody;
+  };
+  response?: {
+    status: number;
+    headers: Record<string, string>;
+    body: CapturedBody;
+  };
+}
+export interface LogLine {
+  timestamp_ms: number;
+  level: string;
+  tag: string;
+  message: string;
+}
+export interface Diagnostic {
+  signature: string;
+  category: string;
+  title: string;
+  count: number;
+  lines: LogLine[];
+}

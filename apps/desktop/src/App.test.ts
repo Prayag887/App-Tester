@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCurl, removeRequestAndChooseNext } from "./App";
+import { parseCurl, removeRequestAndChooseNext, variablesIn } from "./App";
 import type { ApiRequest } from "./types";
 
 function request(id: string): ApiRequest {
@@ -61,5 +61,13 @@ describe("cURL paste", () => {
       enabled: true,
     });
     expect(imported.body).toBe('{"name":"Ada"}');
+  });
+});
+
+describe("URL variables", () => {
+  it("finds Postman-style variables for hover previews", () => {
+    expect(variablesIn("{{baseURL}}/student/{{ studentId }}/send-otp")).toEqual(
+      ["baseURL", "studentId"],
+    );
   });
 });
