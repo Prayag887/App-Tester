@@ -177,16 +177,10 @@ pub fn discover_adb_path() -> Option<PathBuf> {
 
 pub fn list_devices(runner: &dyn AdbRunner) -> Result<Vec<AndroidDevice>, DeviceError> {
     let output = runner.run(&["devices", "-l"])?;
-    parse_device_list(&output)
-        .into_iter()
-        .map(|mut device| {
-            if device.authorization_status == AuthorizationStatus::Authorized {
-                enrich_device(runner, &mut device);
-            }
-            device
-        })
-        .collect::<Vec<_>>()
-        .pipe(Ok)
+    // `adb devices -l` already includes the model needed by the picker.  Do
+    // not run six extra shell commands per device here: this command is polled
+    // frequently so that a USB connection appears immediately in the UI.
+    Ok(parse_device_list(&output))
 }
 
 pub fn list_third_party_apps(
@@ -194,27 +188,60 @@ pub fn list_third_party_apps(
     serial: &str,
 ) -> Result<Vec<AndroidApp>, DeviceError> {
     let output = runner.run(&["-s", serial, "shell", "pm", "list", "packages", "-3"])?;
-    let mut apps = parse_package_list(&output)
+    let package_names = parse_package_list(&output);
+    if package_names.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // One package-manager dump is vastly faster than spawning a new `dumpsys`
+    // process for every third-party app on the phone.
+    let package_dump = runner
+        .run(&["-s", serial, "shell", "dumpsys", "package"])
+        .unwrap_or_default();
+    let mut apps = package_names
         .into_iter()
         .filter_map(|package_name| {
-            let details = runner
-                .run(&["-s", serial, "shell", "dumpsys", "package", &package_name])
-                .unwrap_or_default();
-            let debuggable = package_is_debuggable(&details);
-            if !debuggable {
-                return None;
-            }
-            let (version_name, version_code) = parse_package_version(&details);
-            Some(AndroidApp {
-                package_name,
-                version_name,
-                version_code,
-                debuggable,
+            package_details(&package_dump, &package_name).map(|details| (package_name, details))
+        })
+        .filter_map(|(package_name, details)| {
+            package_is_debuggable(details).then(|| {
+                let (version_name, version_code) = parse_package_version(details);
+                AndroidApp {
+                    package_name,
+                    version_name,
+                    version_code,
+                    debuggable: true,
+                }
             })
         })
         .collect::<Vec<_>>();
+    // Some OEM package managers omit or truncate flag data in their complete
+    // dump. Keep the package picker usable in that case: selecting a package
+    // is still validated by Android before capture begins.
+    if apps.is_empty() {
+        apps = parse_package_list(&output)
+            .into_iter()
+            .map(|package_name| AndroidApp {
+                package_name,
+                version_name: None,
+                version_code: None,
+                debuggable: false,
+            })
+            .collect();
+    }
     apps.sort_by(|left, right| left.package_name.cmp(&right.package_name));
     Ok(apps)
+}
+
+fn package_details<'a>(dump: &'a str, package_name: &str) -> Option<&'a str> {
+    let marker = format!("Package [{}]", package_name);
+    let start = dump.find(&marker)?;
+    let details = &dump[start..];
+    let end = details[marker.len()..]
+        .find("\n  Package [")
+        .map(|offset| marker.len() + offset)
+        .unwrap_or(details.len());
+    Some(&details[..end])
 }
 
 fn package_is_debuggable(package_dump: &str) -> bool {
@@ -318,40 +345,6 @@ pub fn parse_package_version(output: &str) -> (Option<String>, Option<u64>) {
     (version_name, version_code)
 }
 
-fn enrich_device(runner: &dyn AdbRunner, device: &mut AndroidDevice) {
-    let serial = device.serial.as_str();
-    device.android_version = property(runner, serial, "ro.build.version.release");
-    device.api_level =
-        property(runner, serial, "ro.build.version.sdk").and_then(|v| v.parse().ok());
-    device.architecture = property(runner, serial, "ro.product.cpu.abi");
-    device.model = device
-        .model
-        .take()
-        .or_else(|| property(runner, serial, "ro.product.model"));
-    device.resolution = runner
-        .run(&["-s", serial, "shell", "wm", "size"])
-        .ok()
-        .and_then(|value| {
-            value
-                .lines()
-                .last()?
-                .split_once(':')
-                .map(|(_, v)| v.trim().to_owned())
-        });
-    device.density = runner
-        .run(&["-s", serial, "shell", "wm", "density"])
-        .ok()
-        .and_then(|value| value.lines().last()?.split_once(':')?.1.trim().parse().ok());
-}
-
-fn property(runner: &dyn AdbRunner, serial: &str, name: &str) -> Option<String> {
-    runner
-        .run(&["-s", serial, "shell", "getprop", name])
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
 pub fn parse_device_list(output: &str) -> Vec<AndroidDevice> {
     output
         .lines()
@@ -396,13 +389,6 @@ pub fn classify_connection(serial: &str) -> ConnectionType {
         ConnectionType::Usb
     }
 }
-
-trait Pipe: Sized {
-    fn pipe<T>(self, function: impl FnOnce(Self) -> T) -> T {
-        function(self)
-    }
-}
-impl<T> Pipe for T {}
 
 #[cfg(test)]
 mod tests {
@@ -456,6 +442,12 @@ deadbeef offline\n";
         assert!(!package_is_debuggable(
             "flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]"
         ));
+
+        let dump = "  Package [com.example.app] (123):\n    versionCode=42 minSdk=24\n    versionName=2.4.1\n    flags=[ HAS_CODE DEBUGGABLE ]\n  Package [com.example.other] (456):\n";
+        assert!(package_is_debuggable(
+            package_details(dump, "com.example.app").unwrap()
+        ));
+        assert!(package_details(dump, "missing").is_none());
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, ComparisonRules, CompanionApp, CompanionConnection, CompanionInstall, HttpTransaction, ProxyConfiguration, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary } from "./types";
+import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, ComparisonRules, CompanionApp, CompanionConnection, CompanionInstall, HttpTransaction, ProxyConfiguration, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary, UsbCompanionConnection } from "./types";
 const native = () => "__TAURI_INTERNALS__" in window;
 export const discoverDevices = async (): Promise<AndroidDevice[]> => native() ? invoke("discover_devices") : [];
 export const listInstalledApps = async (serial: string): Promise<AndroidApp[]> => invoke("list_installed_apps", { serial });
@@ -50,6 +50,12 @@ export const prepareCompanionConnection = async (host:string):Promise<CompanionC
 export const listCompanionApps = async (token:string):Promise<CompanionApp[]> => invoke("list_companion_apps", {token});
 export const selectCompanionPackage = async (token:string, packageName:string):Promise<void> =>
   invoke("select_companion_package", {token, packageName});
+export const startUsbCompanionCapture = async (serial:string, packageName:string):Promise<CompanionApp[]> =>
+  invoke("start_usb_companion_capture", { serial, packageName });
+export const openUsbCompanion = async (serial:string, packageName:string):Promise<UsbCompanionConnection> =>
+  invoke("open_usb_companion", { serial, packageName });
+export const stopUsbCompanionCapture = async (serial:string):Promise<void> =>
+  invoke("stop_usb_companion_capture", { serial });
 export const installCompanion = async (serial:string):Promise<string> => invoke("install_companion", { serial });
 export const finishQrPairing = async (pairingId:string):Promise<QrPairingResult> => invoke("finish_qr_pairing",{pairingId});
 export const pairWithCode = async (host:string, port:number, pairingCode:string):Promise<QrPairingResult> =>

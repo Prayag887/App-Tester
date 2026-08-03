@@ -20,7 +20,8 @@ class _AppTesterMarkPainter extends CustomPainter {
     final unit = size.width / 128;
     final bounds = Rect.fromLTWH(0, 0, size.width, size.height);
     final panel = Paint()..color = const Color(0xff071632);
-    canvas.drawRRect(RRect.fromRectAndRadius(bounds, Radius.circular(28 * unit)), panel);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(bounds, Radius.circular(28 * unit)), panel);
 
     final line = Paint()
       ..color = const Color(0xffdce5f2)
@@ -37,20 +38,40 @@ class _AppTesterMarkPainter extends CustomPainter {
       Radius.circular(7 * unit),
     );
     canvas.drawRRect(phone, line);
-    canvas.drawLine(Offset(58 * unit, 31 * unit), Offset(70 * unit, 31 * unit), line);
-    canvas.drawLine(Offset(59 * unit, 96 * unit), Offset(69 * unit, 96 * unit), line);
+    canvas.drawLine(
+        Offset(58 * unit, 31 * unit), Offset(70 * unit, 31 * unit), line);
+    canvas.drawLine(
+        Offset(59 * unit, 96 * unit), Offset(69 * unit, 96 * unit), line);
     for (final path in [
-      [Offset(38 * unit, 42 * unit), Offset(34 * unit, 42 * unit), Offset(34 * unit, 59 * unit)],
-      [Offset(38 * unit, 85 * unit), Offset(34 * unit, 85 * unit), Offset(34 * unit, 69 * unit)],
-      [Offset(90 * unit, 42 * unit), Offset(95 * unit, 42 * unit), Offset(95 * unit, 59 * unit)],
-      [Offset(90 * unit, 85 * unit), Offset(95 * unit, 85 * unit), Offset(95 * unit, 69 * unit)],
+      [
+        Offset(38 * unit, 42 * unit),
+        Offset(34 * unit, 42 * unit),
+        Offset(34 * unit, 59 * unit)
+      ],
+      [
+        Offset(38 * unit, 85 * unit),
+        Offset(34 * unit, 85 * unit),
+        Offset(34 * unit, 69 * unit)
+      ],
+      [
+        Offset(90 * unit, 42 * unit),
+        Offset(95 * unit, 42 * unit),
+        Offset(95 * unit, 59 * unit)
+      ],
+      [
+        Offset(90 * unit, 85 * unit),
+        Offset(95 * unit, 85 * unit),
+        Offset(95 * unit, 69 * unit)
+      ],
     ]) {
       canvas.drawLine(path[0], path[1], accent);
       canvas.drawLine(path[1], path[2], accent);
     }
     canvas.drawCircle(Offset(64 * unit, 64 * unit), 14 * unit, accent);
-    canvas.drawLine(Offset(57 * unit, 64 * unit), Offset(62 * unit, 69 * unit), accent);
-    canvas.drawLine(Offset(62 * unit, 69 * unit), Offset(72 * unit, 57 * unit), accent);
+    canvas.drawLine(
+        Offset(57 * unit, 64 * unit), Offset(62 * unit, 69 * unit), accent);
+    canvas.drawLine(
+        Offset(62 * unit, 69 * unit), Offset(72 * unit, 57 * unit), accent);
   }
 
   @override

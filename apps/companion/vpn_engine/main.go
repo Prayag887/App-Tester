@@ -22,13 +22,28 @@ import "C"
 import (
 	"fmt"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	_ "github.com/xjasonlyu/tun2socks/v2/dns"
 	"github.com/xjasonlyu/tun2socks/v2/engine"
 )
 
-var engineLock sync.Mutex
+var (
+	engineLock  sync.Mutex
+	activeTunFD = -1
+)
+
+// stopTunnel releases both layers that own the detached Android TUN file
+// descriptor. VpnService cannot close a descriptor after detachFd(), so the
+// native relay must do it or Android will continue to show an active VPN.
+func stopTunnel() {
+	engine.Stop()
+	if activeTunFD >= 0 {
+		_ = syscall.Close(activeTunFD)
+		activeTunFD = -1
+	}
+}
 
 //export Java_dev_prayag_apptester_companion_VpnNative_start
 func Java_dev_prayag_apptester_companion_VpnNative_start(env *C.JNIEnv, clazz C.jclass, fd C.jint, proxy C.jstring) C.jstring {
@@ -41,7 +56,7 @@ func Java_dev_prayag_apptester_companion_VpnNative_start(env *C.JNIEnv, clazz C.
 	}
 	defer C.free(unsafe.Pointer(value))
 
-	engine.Stop()
+	stopTunnel()
 	engine.Insert(&engine.Key{
 		Device:   fmt.Sprintf("fd://%d", int(fd)),
 		Proxy:    C.GoString(value),
@@ -51,6 +66,7 @@ func Java_dev_prayag_apptester_companion_VpnNative_start(env *C.JNIEnv, clazz C.
 	// engine.Start configures the gVisor packet stack and returns immediately.
 	// The configured device and stack remain active until stop is called.
 	engine.Start()
+	activeTunFD = int(fd)
 	return C.appTesterJString(env, C.CString(""))
 }
 
@@ -58,7 +74,7 @@ func Java_dev_prayag_apptester_companion_VpnNative_start(env *C.JNIEnv, clazz C.
 func Java_dev_prayag_apptester_companion_VpnNative_stop(env *C.JNIEnv, clazz C.jclass) {
 	engineLock.Lock()
 	defer engineLock.Unlock()
-	engine.Stop()
+	stopTunnel()
 }
 
 func main() {}

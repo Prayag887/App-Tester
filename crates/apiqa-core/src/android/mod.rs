@@ -178,6 +178,129 @@ pub fn validate_companion_connection(host: &str) -> Result<(), DeviceError> {
     validate_host(host)
 }
 
+/// Makes the desktop proxy available to a USB-connected device and asks the
+/// installed Companion to register and start its per-app VPN capture. Android
+/// sees the desktop endpoint as loopback; the ADB reverse tunnel carries that
+/// traffic over USB, so no LAN address, QR exchange, or fixed port is needed.
+pub fn start_usb_companion_capture(
+    runner: &dyn AdbRunner,
+    serial: &str,
+    port: u16,
+    token: &str,
+    target_package: &str,
+) -> Result<(), DeviceError> {
+    if port == 0 {
+        return Err(DeviceError::Adb(
+            "proxy must be running before starting the USB companion".into(),
+        ));
+    }
+    if token.is_empty() || target_package.trim().is_empty() {
+        return Err(DeviceError::Adb(
+            "a companion token and target package are required".into(),
+        ));
+    }
+    let port = port.to_string();
+    runner.run(&[
+        "-s",
+        serial,
+        "reverse",
+        &format!("tcp:{port}"),
+        &format!("tcp:{port}"),
+    ])?;
+    runner.run(&[
+        "-s",
+        serial,
+        "shell",
+        "am",
+        "start",
+        "-n",
+        "dev.prayag.apptester.companion/.MainActivity",
+        "--es",
+        "app_tester_host",
+        "127.0.0.1",
+        "--ei",
+        "app_tester_port",
+        &port,
+        "--es",
+        "app_tester_token",
+        token,
+        "--es",
+        "app_tester_package",
+        target_package,
+    ])?;
+    Ok(())
+}
+
+/// Makes the desktop proxy reachable over USB and opens the companion with the
+/// new endpoint. This deliberately does not start or stop the phone's VPN.
+pub fn open_usb_companion(
+    runner: &dyn AdbRunner,
+    serial: &str,
+    port: u16,
+    target_package: &str,
+) -> Result<(), DeviceError> {
+    if port == 0 {
+        return Err(DeviceError::Adb(
+            "proxy must be running before opening the companion".into(),
+        ));
+    }
+    if target_package.trim().is_empty() {
+        return Err(DeviceError::Adb(
+            "select a target package before opening the companion".into(),
+        ));
+    }
+    let port = port.to_string();
+    runner.run(&[
+        "-s",
+        serial,
+        "reverse",
+        &format!("tcp:{port}"),
+        &format!("tcp:{port}"),
+    ])?;
+    runner.run(&[
+        "-s",
+        serial,
+        "shell",
+        "am",
+        "start",
+        "-n",
+        "dev.prayag.apptester.companion/.MainActivity",
+        "--es",
+        "app_tester_host",
+        "127.0.0.1",
+        "--ei",
+        "app_tester_port",
+        &port,
+        "--es",
+        "app_tester_package",
+        target_package,
+        "--ez",
+        "app_tester_configure_only",
+        "true",
+    ])?;
+    Ok(())
+}
+
+/// Tells the USB-connected Companion to close its capture VPN. This is an
+/// explicit lifecycle handoff instead of relying on the Companion's endpoint
+/// watchdog, which can otherwise leave the VPN active for up to its next
+/// health-check cycle after desktop capture ends.
+pub fn stop_usb_companion_capture(runner: &dyn AdbRunner, serial: &str) -> Result<(), DeviceError> {
+    runner.run(&[
+        "-s",
+        serial,
+        "shell",
+        "am",
+        "start",
+        "-n",
+        "dev.prayag.apptester.companion/.MainActivity",
+        "--ez",
+        "app_tester_stop_vpn",
+        "true",
+    ])?;
+    Ok(())
+}
+
 pub fn parse_wifi_ipv4(routes: &str) -> Option<String> {
     let expression =
         Regex::new(r"\bsrc ((?:\d{1,3}\.){3}\d{1,3})\b").expect("valid IP route regex");
@@ -390,6 +513,99 @@ mod tests {
     fn validates_companion_connection_values() {
         assert!(validate_companion_connection("192.168.1.12").is_ok());
         assert!(validate_companion_connection("host/path").is_err());
+    }
+
+    #[test]
+    fn starts_companion_capture_through_a_serial_scoped_reverse_tunnel() {
+        use std::sync::Mutex;
+
+        struct RecordingRunner(Mutex<Vec<Vec<String>>>);
+        impl AdbRunner for RecordingRunner {
+            fn run(&self, args: &[&str]) -> Result<String, DeviceError> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(args.iter().map(|arg| (*arg).into()).collect());
+                Ok("Starting: Intent".into())
+            }
+            fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
+                unreachable!("USB companion startup does not transfer a file")
+            }
+        }
+
+        let runner = RecordingRunner(Mutex::new(Vec::new()));
+        start_usb_companion_capture(
+            &runner,
+            "usb-serial",
+            49560,
+            "secure-token",
+            "com.example.app",
+        )
+        .unwrap();
+        assert_eq!(
+            *runner.0.lock().unwrap(),
+            vec![
+                vec!["-s", "usb-serial", "reverse", "tcp:49560", "tcp:49560"],
+                vec![
+                    "-s",
+                    "usb-serial",
+                    "shell",
+                    "am",
+                    "start",
+                    "-n",
+                    "dev.prayag.apptester.companion/.MainActivity",
+                    "--es",
+                    "app_tester_host",
+                    "127.0.0.1",
+                    "--ei",
+                    "app_tester_port",
+                    "49560",
+                    "--es",
+                    "app_tester_token",
+                    "secure-token",
+                    "--es",
+                    "app_tester_package",
+                    "com.example.app",
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn stops_companion_vpn_through_a_serial_scoped_intent() {
+        use std::sync::Mutex;
+
+        struct RecordingRunner(Mutex<Vec<Vec<String>>>);
+        impl AdbRunner for RecordingRunner {
+            fn run(&self, args: &[&str]) -> Result<String, DeviceError> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(args.iter().map(|arg| (*arg).into()).collect());
+                Ok("Starting: Intent".into())
+            }
+            fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
+                unreachable!("stopping the companion does not transfer a file")
+            }
+        }
+
+        let runner = RecordingRunner(Mutex::new(Vec::new()));
+        stop_usb_companion_capture(&runner, "usb-serial").unwrap();
+        assert_eq!(
+            *runner.0.lock().unwrap(),
+            vec![vec![
+                "-s",
+                "usb-serial",
+                "shell",
+                "am",
+                "start",
+                "-n",
+                "dev.prayag.apptester.companion/.MainActivity",
+                "--ez",
+                "app_tester_stop_vpn",
+                "true",
+            ]]
+        );
     }
 
     #[test]

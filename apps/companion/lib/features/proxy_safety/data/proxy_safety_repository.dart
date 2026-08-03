@@ -37,14 +37,17 @@ class CompanionLogEntry {
   final String time;
   final String message;
   factory CompanionLogEntry.fromMap(Map<Object?, Object?> values) =>
-      CompanionLogEntry(time: values['time'] as String? ?? '', message: values['message'] as String? ?? '');
+      CompanionLogEntry(
+          time: values['time'] as String? ?? '',
+          message: values['message'] as String? ?? '');
 }
 
 abstract interface class ProxySafetyRepository {
-  Future<List<Map<String, String>>> installedDebugApps();
   Future<ProxySafetyStatus> status();
-  Future<ProxySafetyStatus> startMonitoring({required String host, required int port});
+  Future<ProxySafetyStatus> startMonitoring(
+      {required String host, required int port});
   Future<ProxySafetyStatus> stopMonitoring();
-  Future<ProxySafetyStatus> startVpn({required String host, required int port, required String targetPackage});
+  Future<ProxySafetyStatus> startVpn(
+      {required String host, required int port, required String targetPackage});
   Future<ProxySafetyStatus> stopVpn();
 }

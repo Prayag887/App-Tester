@@ -17,7 +17,7 @@ use hudsucker::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    net::{SocketAddr, TcpStream},
+    net::SocketAddr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -112,6 +112,7 @@ struct CaptureHandler {
     session_id: Uuid,
     current_id: Option<Uuid>,
     transactions: Arc<DashMap<Uuid, HttpTransaction>>,
+    recent_by_endpoint: Arc<DashMap<String, HttpTransaction>>,
     database: Arc<Database>,
     events: EventBroadcaster,
     preview_limit: usize,
@@ -133,6 +134,27 @@ pub fn baseline_key(endpoint: &EndpointIdentity) -> String {
         "{} {} {}",
         endpoint.method, endpoint.host, endpoint.path_template
     )
+}
+const MAX_RECENT_ENDPOINTS: usize = 10_000;
+
+fn remember_recent_endpoint(
+    recent_by_endpoint: &DashMap<String, HttpTransaction>,
+    transaction: HttpTransaction,
+) {
+    let Some(endpoint) = transaction.endpoint_identity.as_ref() else {
+        return;
+    };
+    let key = baseline_key(endpoint);
+    if !recent_by_endpoint.contains_key(&key) && recent_by_endpoint.len() >= MAX_RECENT_ENDPOINTS {
+        if let Some(eviction_key) = recent_by_endpoint
+            .iter()
+            .min_by_key(|entry| entry.updated_at)
+            .map(|entry| entry.key().clone())
+        {
+            recent_by_endpoint.remove(&eviction_key);
+        }
+    }
+    recent_by_endpoint.insert(key, transaction);
 }
 fn body_storage(bytes: &[u8], limit: usize) -> BodyStorage {
     if bytes.is_empty() {
@@ -217,6 +239,7 @@ fn record_streamed_response(
     transaction.timing.response_started_ms = Some(now.unix_timestamp_nanos() as i64 / 1_000_000);
     transaction.timing.response_complete_ms = transaction.timing.response_started_ms;
     let completed = transaction.clone();
+    remember_recent_endpoint(&handler.recent_by_endpoint, completed.clone());
     let _ = handler.database.upsert_transaction(&completed);
     handler
         .events
@@ -398,23 +421,12 @@ impl HttpHandler for CaptureHandler {
                 .get(&current_id)?
                 .endpoint_identity
                 .clone()?;
+            let key = baseline_key(&endpoint);
             self.database
-                .pinned_baseline(&baseline_key(&endpoint))
+                .pinned_baseline(&key)
                 .ok()
                 .flatten()
-                .or_else(|| {
-                    self.transactions
-                        .iter()
-                        .filter(|entry| entry.id != current_id && entry.response.is_some())
-                        .filter(|entry| {
-                            entry.endpoint_identity.as_ref().is_some_and(|candidate| {
-                                crate::comparison::compatibility(&endpoint, candidate)
-                                    != crate::comparison::ComparisonCompatibility::Incompatible
-                            })
-                        })
-                        .max_by_key(|entry| entry.updated_at)
-                        .map(|entry| entry.clone())
-                })
+                .or_else(|| self.recent_by_endpoint.get(&key).map(|entry| entry.clone()))
         });
         if let Some(id) = self.current_id
             && let Some(mut transaction) = self.transactions.get_mut(&id)
@@ -496,6 +508,7 @@ impl HttpHandler for CaptureHandler {
                 });
             }
             let completed = transaction.clone();
+            remember_recent_endpoint(&self.recent_by_endpoint, completed.clone());
             let _ = self.database.upsert_transaction(&completed);
             self.events
                 .send(InspectorEvent::TransactionCompleted(completed));
@@ -510,6 +523,7 @@ pub struct ProxyService {
     database: Arc<Database>,
     events: EventBroadcaster,
     transactions: Arc<DashMap<Uuid, HttpTransaction>>,
+    recent_by_endpoint: Arc<DashMap<String, HttpTransaction>>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
     task: Mutex<Option<JoinHandle<()>>>,
     companion_links: Arc<DashMap<String, CompanionLink>>,
@@ -526,6 +540,7 @@ impl ProxyService {
             database,
             events,
             transactions: Arc::new(DashMap::new()),
+            recent_by_endpoint: Arc::new(DashMap::new()),
             shutdown: Mutex::new(None),
             task: Mutex::new(None),
             companion_links: Arc::new(DashMap::new()),
@@ -575,44 +590,32 @@ impl ProxyService {
             self.set_status(ProxyStatus::CertificateRequired);
             anyhow::bail!("CA certificate is required");
         }
-        let initial_port = config.port;
-        let Some(port) = (initial_port..initial_port.saturating_add(10)).find(|port| {
-            TcpStream::connect_timeout(
-                &SocketAddr::from(([127, 0, 0, 1], *port)),
-                Duration::from_millis(100),
-            )
-            .is_err()
-        }) else {
+        // Let the operating system select an unused port. A fixed capture port
+        // makes pairing fail on machines where another process already owns it.
+        let requested_address: SocketAddr = format!("{}:0", config.bind_address).parse()?;
+        let reservation = std::net::TcpListener::bind(requested_address).map_err(|error| {
             self.set_status(ProxyStatus::Failed);
-            anyhow::bail!(
-                "no capture proxy port is available between {initial_port} and {}",
-                initial_port.saturating_add(9)
-            );
-        };
-        config.port = port;
-        *self.config.lock().expect("proxy config lock") = config.clone();
-        let bind_address: SocketAddr =
-            format!("{}:{}", config.bind_address, config.port).parse()?;
-        // Hudsucker binds when its background task starts. Reserve the address
-        // first so a port conflict is returned to the caller before any Android
-        // device is configured to route traffic to a proxy that never started.
-        std::net::TcpListener::bind(bind_address).map_err(|error| {
-            self.set_status(ProxyStatus::Failed);
-            anyhow::anyhow!("could not bind capture proxy at {bind_address}: {error}")
+            anyhow::anyhow!("could not reserve a capture proxy port: {error}")
         })?;
+        let bind_address = reservation.local_addr()?;
+        reservation.set_nonblocking(true)?;
+        let listener = tokio::net::TcpListener::from_std(reservation)?;
+        config.port = bind_address.port();
+        *self.config.lock().expect("proxy config lock") = config.clone();
         let ca = load_authority(ca_dir)?;
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let handler = CaptureHandler {
             session_id,
             current_id: None,
             transactions: self.transactions.clone(),
+            recent_by_endpoint: self.recent_by_endpoint.clone(),
             database: self.database.clone(),
             events: self.events.clone(),
             preview_limit: 1024 * 1024,
             companion_links: self.companion_links.clone(),
         };
         let proxy = Proxy::builder()
-            .with_addr(bind_address)
+            .with_listener(listener)
             .with_ca(ca)
             .with_rustls_connector(aws_lc_rs::default_provider())
             .with_http_handler(handler)
@@ -631,15 +634,25 @@ impl ProxyService {
         // `Proxy::start` binds in its background task. Do not expose a QR code
         // until that listener is genuinely reachable; otherwise a port conflict
         // can make the Companion register with an unrelated local process.
-        let ready = (0..40).any(|_| {
-            if task.is_finished()
-                || TcpStream::connect_timeout(&bind_address, Duration::from_millis(50)).is_ok()
-            {
-                return true;
+        let readiness_address = SocketAddr::from(([127, 0, 0, 1], bind_address.port()));
+        let mut ready = false;
+        for _ in 0..40 {
+            if task.is_finished() {
+                break;
             }
-            std::thread::sleep(Duration::from_millis(25));
-            false
-        });
+            if matches!(
+                tokio::time::timeout(
+                    Duration::from_millis(50),
+                    tokio::net::TcpStream::connect(readiness_address),
+                )
+                .await,
+                Ok(Ok(_))
+            ) {
+                ready = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
         if !ready || task.is_finished() {
             let _ = shutdown_tx.send(());
             let _ = task.await;
@@ -660,12 +673,16 @@ impl ProxyService {
             let _ = task.await;
         }
         self.set_status(ProxyStatus::Stopped);
+        self.transactions.clear();
+        self.recent_by_endpoint.clear();
+        self.companion_links.clear();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::Database;
 
     #[test]
     fn streams_large_or_apk_responses_without_buffering_them() {
@@ -704,5 +721,31 @@ mod tests {
             request_shape: None,
         };
         assert_eq!(baseline_key(&endpoint), "GET api.example.test /users/{id}");
+    }
+
+    #[tokio::test]
+    async fn starts_on_an_os_assigned_port_and_accepts_loopback_connections() {
+        let root = std::env::temp_dir().join(format!("app-tester-proxy-{}", Uuid::new_v4()));
+        let certificate = generate_ca(&root).unwrap();
+        let service = ProxyService::new(
+            ProxyConfiguration {
+                bind_address: "0.0.0.0".into(),
+                port: 0,
+                ca_certificate_path: certificate.certificate_path,
+                ca_fingerprint_sha256: None,
+            },
+            Arc::new(Database::open_in_memory().unwrap()),
+            EventBroadcaster::default(),
+        );
+        service.start(Uuid::new_v4()).await.unwrap();
+        let port = service.configuration().port;
+        assert_ne!(port, 0);
+        assert!(
+            tokio::net::TcpStream::connect(SocketAddr::from(([127, 0, 0, 1], port)))
+                .await
+                .is_ok()
+        );
+        service.stop().await;
+        let _ = std::fs::remove_dir_all(root);
     }
 }

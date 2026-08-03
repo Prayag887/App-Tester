@@ -72,6 +72,12 @@ struct CompanionConnectionPayload<'a> {
     minimum_companion_version: &'static str,
 }
 
+#[derive(serde::Serialize)]
+struct UsbCompanionConnection {
+    session_id: String,
+    port: u16,
+}
+
 struct InspectorState {
     proxy: Arc<ProxyService>,
     database: Arc<Database>,
@@ -79,6 +85,7 @@ struct InspectorState {
     ca_directory: std::path::PathBuf,
     qr_pairings: Mutex<HashMap<Uuid, QrPairingSecret>>,
     logcat_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    companion_device: Mutex<Option<String>>,
     configured_device: Mutex<Option<String>>,
     configured_device_path: std::path::PathBuf,
 }
@@ -189,6 +196,97 @@ fn select_companion_package(
         .proxy
         .select_companion_package(&token, &package_name)
         .map_err(|error| error.to_string())
+}
+
+/// Connect a USB device without exposing a pairing code. The device sees the
+/// dynamically assigned desktop proxy through `adb reverse` at 127.0.0.1.
+/// The Companion registers its installed apps and starts its per-app VPN from
+/// the explicit ADB intent. We wait for that registration so the UI only calls
+/// the connection established after the desktop has received it.
+#[tauri::command]
+async fn start_usb_companion_capture(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+    package_name: String,
+) -> Result<Vec<CompanionApp>, String> {
+    let port = state.proxy.configuration().port;
+    let token = Uuid::new_v4().simple().to_string();
+    let command_serial = serial.clone();
+    let command_package = package_name.clone();
+    let command_token = token.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        android::start_usb_companion_capture(
+            &adb,
+            &command_serial,
+            port,
+            &command_token,
+            &command_package,
+        )
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("USB companion launch task failed: {error}"))??;
+
+    let proxy = state.proxy.clone();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(12);
+    loop {
+        let apps = proxy.companion_apps(&token);
+        if apps.iter().any(|app| app.package_name == package_name) {
+            return Ok(apps);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err("Companion was opened, but it did not confirm its USB connection. Approve Android's VPN permission if prompted, then try Capture again.".into());
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+#[tauri::command]
+async fn open_usb_companion(
+    state: tauri::State<'_, InspectorState>,
+    serial: String,
+    package_name: String,
+) -> Result<UsbCompanionConnection, String> {
+    let session_id = {
+        let mut session = state
+            .session_id
+            .lock()
+            .map_err(|_| "session lock poisoned")?;
+        *session.get_or_insert_with(Uuid::new_v4)
+    };
+    state
+        .proxy
+        .start(session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let port = state.proxy.configuration().port;
+    let command_serial = serial.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        android::open_usb_companion(&adb, &command_serial, port, &package_name)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("companion launch task failed: {error}"))??;
+    *state
+        .companion_device
+        .lock()
+        .map_err(|_| "companion device lock poisoned")? = Some(serial);
+    Ok(UsbCompanionConnection {
+        session_id: session_id.to_string(),
+        port,
+    })
+}
+
+#[tauri::command]
+async fn stop_usb_companion_capture(serial: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+        android::stop_usb_companion_capture(&adb, &serial).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("companion stop task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -668,6 +766,21 @@ async fn stop_proxy(state: tauri::State<'_, InspectorState>) -> Result<(), Strin
     {
         task.abort();
     }
+    let companion_device = {
+        state
+            .companion_device
+            .lock()
+            .map_err(|_| "companion device lock poisoned")?
+            .take()
+    };
+    if let Some(serial) = companion_device {
+        tauri::async_runtime::spawn_blocking(move || {
+            let adb = ProcessAdb::discover().map_err(|error| error.to_string())?;
+            android::stop_usb_companion_capture(&adb, &serial).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| format!("companion stop task failed: {error}"))??;
+    }
     state.proxy.stop().await;
     Ok(())
 }
@@ -974,7 +1087,7 @@ pub fn run() {
             let proxy = Arc::new(ProxyService::new(
                 ProxyConfiguration {
                     bind_address: "0.0.0.0".into(),
-                    port: 8080,
+                    port: 0,
                     ca_certificate_path: ca_directory.join("app-tester-ca.pem"),
                     ca_fingerprint_sha256: None,
                 },
@@ -1006,6 +1119,7 @@ pub fn run() {
                 ca_directory,
                 qr_pairings: Mutex::new(HashMap::new()),
                 logcat_task: Mutex::new(None),
+                companion_device: Mutex::new(None),
                 configured_device: Mutex::new(None),
                 configured_device_path,
             });
@@ -1020,6 +1134,9 @@ pub fn run() {
             prepare_companion_connection,
             list_companion_apps,
             select_companion_package,
+            start_usb_companion_capture,
+            open_usb_companion,
+            stop_usb_companion_capture,
             install_companion,
             finish_qr_pairing,
             pair_with_code,
@@ -1068,6 +1185,17 @@ pub fn run() {
                         &app_handle.state::<InspectorState>().configured_device_path,
                     );
                 }
+            }
+            let companion_device = app_handle
+                .state::<InspectorState>()
+                .companion_device
+                .lock()
+                .ok()
+                .and_then(|device| device.clone());
+            if let Some(serial) = companion_device
+                && let Ok(adb) = ProcessAdb::discover()
+            {
+                let _ = android::stop_usb_companion_capture(&adb, &serial);
             }
         });
 }

@@ -1,6 +1,6 @@
 use crate::{comparison::ComparisonRules, traffic::HttpTransaction};
 use rusqlite::{Connection, params};
-use std::{path::Path, sync::Mutex};
+use std::{path::Path, sync::Mutex, time::Duration};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -22,6 +22,9 @@ pub struct Database {
 impl Database {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
         let connection = Connection::open(path)?;
+        connection.pragma_update(None, "journal_mode", "WAL")?;
+        connection.pragma_update(None, "synchronous", "NORMAL")?;
+        connection.busy_timeout(Duration::from_secs(5))?;
         super::migrations::apply(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
