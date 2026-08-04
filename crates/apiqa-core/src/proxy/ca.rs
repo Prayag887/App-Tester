@@ -32,7 +32,10 @@ pub fn generate_ca(directory: &Path) -> anyhow::Result<CertificateInfo> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))?;
     }
-    let fingerprint = format!("{:x}", Sha256::digest(certificate.der()));
+    let fingerprint = Sha256::digest(certificate.der())
+        .iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect::<String>();
     Ok(CertificateInfo {
         certificate_path: cert_path,
         fingerprint_sha256: fingerprint,

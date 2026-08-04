@@ -22,7 +22,10 @@ pub fn store(
     media_type: &str,
     redacted: bool,
 ) -> Result<ArtifactRef, ArtifactError> {
-    let sha256 = format!("{:x}", Sha256::digest(bytes));
+    let sha256 = Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect::<String>();
     let path = root.join(&sha256);
     fs::create_dir_all(root)?;
     if !path.exists() {
