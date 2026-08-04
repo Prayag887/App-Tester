@@ -67,3 +67,29 @@ export interface LogIncident {
 }
 export interface ReplaySummary { attempted:number; completed:number; changed:number; skipped:number; failed:number }
 export interface ComparisonRules { ignored_json_pointers:string[]; volatile_keys:string[] }
+// ---- Composer (manual requests) ----
+export type ManualBody =
+  | { kind: "none" }
+  | { kind: "form"; fields: [string, string][] }
+  | { kind: "multipart"; fields: MultipartField[] }
+  | { kind: "raw"; media_type?: string | null; text: string }
+  | { kind: "binary"; bytes: number[] };
+export interface MultipartField { name: string; value?: string | null; file?: string | null; media_type?: string | null }
+export type AuthSpec =
+  | { kind: "none" }
+  | { kind: "bearer"; token: string }
+  | { kind: "basic"; username: string; password: string }
+  | { kind: "api_key"; key: string; value: string; in_query: boolean };
+export interface ManualRequest {
+  method: string; url: string; query: QueryParameter[]; headers: HeaderEntry[];
+  body: ManualBody; auth: AuthSpec;
+}
+export interface SendOptions {
+  timeout_ms: number; follow_redirects: boolean; max_redirects: number;
+  verify_tls: boolean; proxy_url: string | null;
+}
+export interface SendResult {
+  transaction_id: string; state: string; status: number; reason?: string | null;
+  elapsed_ms: number; total_bytes: number; body: BodyStorage;
+  content_type?: string | null; headers: HeaderEntry[]; http_version: string;
+}

@@ -4,7 +4,7 @@
 
 import type { BodyStorage, HttpTransaction } from "./types";
 
-export type Screen = "traffic" | "logs";
+export type Screen = "traffic" | "logs" | "composer";
 export type Tab =
   "Overview" | "Request" | "Response" | "Compare" | "cURL" | "Timeline";
 export type TransactionState = "Pending" | "Failed" | "Changed" | "Captured";
@@ -59,4 +59,29 @@ export const timeLabel = (iso: string): string =>
 export const copyToClipboard = (value: string, onDone: () => void): void => {
   void navigator.clipboard.writeText(value);
   onDone();
+};
+
+// ---- Composer presentation helpers ----
+
+export const elapsedLabel = (ms: number): string =>
+  ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+
+export const byteSizeLabel = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+/** Maps an HTTP method to the existing row-tone CSS class. */
+export const methodTone = (method: string): string => {
+  switch (method.toUpperCase()) {
+    case "POST":
+    case "PUT":
+    case "PATCH":
+      return "post";
+    case "DELETE":
+      return "delete";
+    default:
+      return "get";
+  }
 };

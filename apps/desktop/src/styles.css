@@ -2928,3 +2928,193 @@ pre {
   from { opacity: 0; transform: scale(0.5) rotate(-18deg); }
   to { opacity: 1; transform: scale(1) rotate(0); }
 }
+
+/* ---- Composer ---- */
+.composer {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(480px, 1fr) minmax(400px, 1fr);
+}
+.composer-request {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #2d3850;
+}
+.composer-bar {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #2d3850;
+}
+.composer-bar select {
+  flex: none;
+  width: 106px;
+  height: 38px;
+  background: #1c2840;
+  border-color: #35425e;
+  font-weight: 700;
+}
+.url-input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #35425e;
+  border-radius: 8px;
+  background: #172238;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12.5px;
+}
+.url-input:focus,
+.composer-fields input:focus,
+.composer-fields select:focus,
+.composer-fields textarea:focus {
+  outline: 0;
+  border-color: #9a7bdb;
+  box-shadow: 0 0 0 3px #785cb52b;
+}
+.composer-bar .primary {
+  flex: none;
+  height: 38px;
+  background: #2a3f63;
+  border-color: #4a6396;
+  font-weight: 700;
+}
+.composer-bar .primary:hover {
+  background: #33507d;
+}
+.composer-bar .primary:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+.composer-tabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid #2d3850;
+  background: #101a2c;
+}
+.composer-tabs button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 9px 12px;
+  color: #96a1b8;
+  font-size: 12px;
+  font-weight: 650;
+}
+.composer-tabs button:hover {
+  background: #16233a;
+}
+.composer-tabs button.active {
+  color: #aa8bea;
+  border-bottom: 2px solid #9a7bdb;
+}
+.composer-fields {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+.composer-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.composer-row select {
+  background: #1c2840;
+  border-color: #35425e;
+}
+.composer-fields input,
+.composer-fields textarea {
+  border: 1px solid #35425e;
+  border-radius: 7px;
+  background: #172238;
+  padding: 8px 10px;
+}
+.kv-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(160px, 1.6fr) 34px;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.kv-row input {
+  min-width: 0;
+}
+.add-row {
+  margin-top: 2px;
+  border: 1px dashed #3a4a6b;
+  background: transparent;
+  color: #9aa6bd;
+  font-size: 12px;
+}
+.add-row:hover {
+  border-color: #9a7bdb;
+  color: #c3b4ec;
+}
+.raw-body {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.auth-input {
+  width: 100%;
+}
+.composer-response {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.composer-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 16px;
+  border-bottom: 1px solid #2d3850;
+  color: #9aa6bd;
+  font-size: 12px;
+}
+.composer-meta b {
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.status-ok {
+  color: #80dfb9;
+}
+.status-bad {
+  color: #ff8f8b;
+}
+.meta-spacer {
+  flex: 1;
+}
+.composer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+.composer-error {
+  margin: 14px 16px;
+  padding: 12px 14px;
+  border: 1px solid #5a3b46;
+  border-radius: 9px;
+  background: #2a1b22;
+  color: #ffb3b0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.composer-error span {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

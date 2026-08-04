@@ -5,6 +5,7 @@
   import Topbar from "./components/Topbar.svelte";
   import NoticeBar from "./components/NoticeBar.svelte";
   import TrafficView from "./components/TrafficView.svelte";
+  import ComposerView from "./components/ComposerView.svelte";
   import LogsView from "./components/LogsView.svelte";
   import {
     closePickers,
@@ -61,6 +62,8 @@
     <NoticeBar />
     {#if screen === "traffic"}
       <TrafficView />
+    {:else if screen === "composer"}
+      <ComposerView />
     {:else}
       <LogsView />
     {/if}

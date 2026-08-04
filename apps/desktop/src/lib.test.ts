@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   bodyText,
+  byteSizeLabel,
   curlCommand,
   durationMs,
+  elapsedLabel,
   endpointId,
+  methodTone,
   prettyJson,
   timeLabel,
   transactionState,
@@ -309,5 +312,37 @@ describe("timeLabel robustness", () => {
   it("handles timestamps without a timezone offset", () => {
     const label = timeLabel("2026-07-24T10:30:45");
     expect(label).toMatch(/^\d{1,2}:\d{2}:\d{2} (AM|PM)$/);
+  });
+});
+
+describe("elapsedLabel", () => {
+  it("uses milliseconds below one second and seconds above", () => {
+    expect(elapsedLabel(0)).toBe("0 ms");
+    expect(elapsedLabel(999)).toBe("999 ms");
+    expect(elapsedLabel(1000)).toBe("1.0 s");
+    expect(elapsedLabel(2500)).toBe("2.5 s");
+  });
+});
+
+describe("byteSizeLabel", () => {
+  it("scales bytes to KB and MB with one decimal", () => {
+    expect(byteSizeLabel(0)).toBe("0 B");
+    expect(byteSizeLabel(1023)).toBe("1023 B");
+    expect(byteSizeLabel(1024)).toBe("1.0 KB");
+    expect(byteSizeLabel(1536)).toBe("1.5 KB");
+    expect(byteSizeLabel(1024 * 1024)).toBe("1.0 MB");
+    expect(byteSizeLabel(3.5 * 1024 * 1024)).toBe("3.5 MB");
+  });
+});
+
+describe("methodTone", () => {
+  it("maps methods to row-tone classes", () => {
+    expect(methodTone("GET")).toBe("get");
+    expect(methodTone("HEAD")).toBe("get");
+    expect(methodTone("post")).toBe("post");
+    expect(methodTone("PUT")).toBe("post");
+    expect(methodTone("PATCH")).toBe("post");
+    expect(methodTone("DELETE")).toBe("delete");
+    expect(methodTone("BREW")).toBe("get");
   });
 });
