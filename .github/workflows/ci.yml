@@ -9,44 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  companion:
-    name: Companion APK
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.5.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: apps/companion/vpn_engine/go.mod
-      - name: Configure Android NDK
-        run: |
-          android_sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          "$android_sdk_root/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.0.12077973"
-          echo "ANDROID_NDK_HOME=$android_sdk_root/ndk/27.0.12077973" >> "$GITHUB_ENV"
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run companion:build:qa
-      - uses: actions/upload-artifact@v4
-        with:
-          name: companion-apk
-          path: apps/companion/releases/app-tester-companion.apk
-
   rust:
     name: Rust (${{ matrix.os }})
-    needs: companion
     strategy:
       fail-fast: false
       matrix:
@@ -57,16 +21,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Install Linux webview dependencies
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/download-artifact@v4
-        with:
-          name: companion-apk
-          path: apps/companion/releases/
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test -p androidqa-core -p app-tester
+      - run: cargo clippy -p androidqa-core -p app-tester --all-targets -- -D warnings
       - run: cargo fmt --all -- --check
 
   frontend:

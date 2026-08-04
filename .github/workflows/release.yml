@@ -1,73 +1,23 @@
-name: Release
+name: Release Windows and Linux
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      companion_apk_url:
+        description: Direct URL to the locally built companion APK release asset.
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  companion:
-    name: Companion APK
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.5.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: apps/companion/vpn_engine/go.mod
-      - run: pnpm install --frozen-lockfile
-      - name: Configure Android release signing
-        shell: bash
-        env:
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          cat > apps/companion/android/signing.properties <<EOF
-          storeFile=app-tester-ci-release.jks
-          storePassword=$ANDROID_STORE_PASSWORD
-          keyAlias=app-tester-companion
-          keyPassword=$ANDROID_KEY_PASSWORD
-          EOF
-      - run: pnpm run companion:build
-      - name: Upload Companion APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: companion-apk
-          path: |
-            apps/companion/releases/app-tester-companion.apk
-
   desktop:
     name: Desktop (${{ matrix.name }})
-    needs: companion
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: macOS Apple Silicon
-            platform: macos-latest
-            args: --target aarch64-apple-darwin
-            assetNamePattern: App_Tester_[version]_macOS_Apple_Silicon.[ext]
-          - name: macOS Intel
-            platform: macos-latest
-            args: --target x86_64-apple-darwin
-            assetNamePattern: App_Tester_[version]_macOS_Intel.[ext]
           - name: Windows
             platform: windows-latest
             args: --bundles nsis
@@ -87,18 +37,15 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ startsWith(matrix.name, 'macOS') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - name: Install Linux webview dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - uses: Swatinem/rust-cache@v2
+      - name: Download locally built companion APK
+        shell: bash
+        run: |
+          mkdir -p apps/companion/releases
+          curl --fail --location --retry 3 "${{ inputs.companion_apk_url }}" --output apps/companion/releases/app-tester-companion.apk
       - run: pnpm install --frozen-lockfile
-      - name: Download Companion APK
-        uses: actions/download-artifact@v4
-        with:
-          name: companion-apk
-          path: apps/companion/releases/
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -107,39 +54,9 @@ jobs:
           tauriScript: pnpm tauri
           tagName: v__VERSION__
           releaseName: App Tester v__VERSION__
-          releaseBody: |
-            App Tester is local-first and sends no telemetry.
-
-            ## Downloads
-            - **macOS Apple Silicon** (M1/M2/M3/M4): `App_Tester_[version]_macOS_Apple_Silicon.dmg`
-            - **macOS Intel**: `App_Tester_[version]_macOS_Intel.dmg`
-            - **Windows**: `App_Tester_[version]_Windows.exe`
-            - **Linux**: `App_Tester_[version]_Linux.AppImage` (self-contained, no dependencies) or the `.deb`
-            - **Android companion**: `app-tester-companion.apk` (arm64; the desktop app installs it automatically over USB)
-
-            ## Notes
-            - **macOS**: the app is ad-hoc signed but not notarized (no Apple Developer certificate). If Gatekeeper blocks it, right-click the app and choose Open, then Open again in the dialog.
-            - **Windows**: SmartScreen may warn about an unsigned installer; choose More info > Run anyway.
-            - **Linux**: the AppImage is self-contained (`chmod +x App_Tester_*.AppImage`). The `.deb` requires WebKitGTK 4.1 and other runtime libraries.
           releaseDraft: false
           prerelease: false
           generateReleaseNotes: true
           args: ${{ matrix.args }}
           retryAttempts: 2
           releaseAssetNamePattern: ${{ matrix.assetNamePattern }}
-
-  companion-release-upload:
-    name: Companion release upload
-    runs-on: ubuntu-22.04
-    needs: desktop
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: companion-apk
-          path: apps/companion/releases/
-      - name: Upload Companion APK to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          shasum -a 256 apps/companion/releases/app-tester-companion.apk | awk '{print $1}' > apps/companion/releases/app-tester-companion.apk.sha256
-          gh release upload "${{ github.ref_name }}" -R Prayag887/App-Tester apps/companion/releases/app-tester-companion.apk apps/companion/releases/app-tester-companion.apk.sha256 --clobber
