@@ -1,7 +1,11 @@
 <script lang="ts">
-  import { Download, FolderUp, Play, Search, Smartphone, Trash2 } from "lucide-svelte";
+  import { onDestroy } from "svelte";
+  import { Check, Copy, Download, FolderUp, Play, Search, Smartphone, Trash2 } from "lucide-svelte";
   let importInput: HTMLInputElement | undefined;
+  let copyTimer: number | undefined;
+  let copied = $state(false);
   import {
+    copySelectedCurl,
     exportCapture,
     getChangedCount,
     getFailedCount,
@@ -27,6 +31,16 @@
   const setChangedOnly = (next: boolean) => ui.changedOnly = next;
   const setErrorsOnly = (next: boolean) => ui.errorsOnly = next;
   const setQuery = (next: string) => ui.query = next;
+  const copyCurl = () => {
+    copySelectedCurl();
+    copied = false;
+    window.requestAnimationFrame(() => copied = true);
+    if (copyTimer !== undefined) window.clearTimeout(copyTimer);
+    copyTimer = window.setTimeout(() => copied = false, 1200);
+  };
+  onDestroy(() => {
+    if (copyTimer !== undefined) window.clearTimeout(copyTimer);
+  });
   import RequestList from "./RequestList.svelte";
   import Inspector from "./Inspector.svelte";
   import MirrorPanel from "./MirrorPanel.svelte";
@@ -37,7 +51,7 @@
   <label class="search-field"><Search size={17}/><input value={query} oninput={(event) => setQuery((event.target as HTMLInputElement).value)} placeholder="Search requests, hosts, paths…" /></label>
   <button class:active={changedOnly} onclick={() => setChangedOnly(!changedOnly)}>Changed <b>{changedCount}</b></button>
   <button class:active={errorsOnly} onclick={() => setErrorsOnly(!errorsOnly)}>Errors <b>{failedCount}</b></button>
-  <div class="toolbar-spacer"></div><button class:active={mirrorOpen} title="Mirror the device screen" onclick={() => setMirrorOpen(!mirrorOpen)}><Smartphone/> Mirror</button><button class:confirming={confirmDeleteAll} class="icon-button destructive" title="Delete all captured traffic and diagnostics" aria-label="Delete all captured traffic and diagnostics" onclick={() => requestDeleteAll()} disabled={busy}>{#if confirmDeleteAll}<b>Confirm?</b>{:else}<Trash2/>{/if}</button><button class="icon-button" title="Export redacted capture" onclick={() => void exportCapture()}><Download/></button><input class="hidden" bind:this={importInput} type="file" accept="application/json,.json" onchange={importCapture}/><button class="icon-button" title="Import capture" onclick={() => importInput?.click()}><FolderUp/></button>
+  <div class="toolbar-spacer"></div><button class:active={mirrorOpen} title="Mirror the device screen" onclick={() => setMirrorOpen(!mirrorOpen)}><Smartphone/> Mirror</button><button class:copied class="icon-button" title={copied ? "cURL copied" : "Copy selected cURL"} aria-label={copied ? "cURL copied" : "Copy selected cURL"} onclick={copyCurl} disabled={!selectedTransaction?.curl?.multiline && !selectedTransaction?.curl?.compact}>{#if copied}<Check/>{:else}<Copy/>{/if}</button><button class:confirming={confirmDeleteAll} class="icon-button destructive" title="Delete all captured traffic and diagnostics" aria-label="Delete all captured traffic and diagnostics" onclick={() => requestDeleteAll()} disabled={busy}>{#if confirmDeleteAll}<b>Confirm?</b>{:else}<Trash2/>{/if}</button><button class="icon-button" title="Export redacted capture" onclick={() => void exportCapture()}><Download/></button><input class="hidden" bind:this={importInput} type="file" accept="application/json,.json" onchange={importCapture}/><button class="icon-button" title="Import capture" onclick={() => importInput?.click()}><FolderUp/></button>
 </section>
 <section class="workbench" class:with-mirror={mirrorOpen}>
   <RequestList />

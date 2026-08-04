@@ -5,13 +5,15 @@
 import type { BodyStorage, HttpTransaction } from "./types";
 
 export type Screen = "traffic" | "logs";
-export type Tab = "Overview" | "Request" | "Response" | "Compare" | "cURL" | "Timeline";
+export type Tab =
+  "Overview" | "Request" | "Response" | "Compare" | "cURL" | "Timeline";
 export type TransactionState = "Pending" | "Failed" | "Changed" | "Captured";
 
 export const transactionState = (tx: HttpTransaction): TransactionState => {
   if (!tx.response) return "Pending";
   if (tx.response.status >= 400) return "Failed";
-  if (tx.comparison?.differences.some(difference => !difference.ignored)) return "Changed";
+  if (tx.comparison?.differences.some((difference) => !difference.ignored))
+    return "Changed";
   return "Captured";
 };
 
@@ -41,6 +43,11 @@ export const prettyJson = (value: string): string => {
 export const endpointId = (tx: HttpTransaction): string | undefined =>
   tx.endpoint_identity &&
   `${tx.endpoint_identity.method} ${tx.endpoint_identity.host} ${tx.endpoint_identity.path_template}`;
+
+/** Returns the generated cURL command preferred for clipboard export. */
+export const curlCommand = (
+  tx: HttpTransaction | undefined,
+): string | undefined => tx?.curl?.multiline || tx?.curl?.compact;
 
 export const timeLabel = (iso: string): string =>
   new Date(iso).toLocaleTimeString([], {
