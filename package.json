@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "pnpm --dir apps/desktop tauri dev",
     "companion:check": "cd apps/companion && flutter analyze && flutter test",
-    "companion:build": "cd apps/companion && flutter build apk --release && node ../../scripts/sync-companion-release.mjs",
+    "companion:build": "cd apps/companion && flutter build apk --release --split-per-abi && node ../../scripts/sync-companion-release.mjs app-arm64-v8a-release.apk",
     "companion:build:qa": "cd apps/companion && flutter build apk --debug && node ../../scripts/sync-companion-release.mjs app-debug.apk",
     "desktop:build": "pnpm --dir apps/desktop tauri build",
     "build": "pnpm run companion:build && pnpm run desktop:build",

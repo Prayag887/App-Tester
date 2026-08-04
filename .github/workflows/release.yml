@@ -69,3 +69,33 @@ jobs:
           args: ${{ matrix.args }}
           retryAttempts: 2
           releaseAssetNamePattern: "App_Tester_[version]_[platform]_[arch].[ext]"
+
+  companion:
+    name: Companion APK
+    runs-on: ubuntu-22.04
+    needs: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run companion:build
+      - name: Upload Companion APK to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shasum -a 256 apps/companion/releases/app-tester-companion.apk | awk '{print $1}' > apps/companion/releases/app-tester-companion.apk.sha256
+          gh release upload "${{ github.ref_name }}" apps/companion/releases/app-tester-companion.apk apps/companion/releases/app-tester-companion.apk.sha256 --clobber

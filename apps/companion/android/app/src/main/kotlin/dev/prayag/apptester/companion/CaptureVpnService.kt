@@ -2,7 +2,10 @@ package dev.prayag.apptester.companion
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
@@ -17,6 +20,18 @@ class CaptureVpnService : VpnService() {
     private var tun: ParcelFileDescriptor? = null
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private var failures = 0
+    private var shuttingDown = false
+    private val stopReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == ACTION_STOP) stopCapture()
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+        registerReceiver(stopReceiver, IntentFilter(ACTION_STOP), Context.RECEIVER_NOT_EXPORTED)
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val host = intent?.getStringExtra(EXTRA_HOST) ?: return START_NOT_STICKY
@@ -55,15 +70,31 @@ class CaptureVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        scheduler.shutdownNow()
-        runCatching { VpnNative.stop() }
-        tun?.close()
-        tun = null
-        ProxySafetyController(this).stopVpn("VPN capture stopped. Direct networking resumed.")
+        unregisterReceiver(stopReceiver)
+        instance = null
+        closeCaptureResources()
+        ProxySafetyController(this).markVpnStopped("VPN capture stopped. Direct networking resumed.")
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)
+
+    private fun stopCapture() {
+        closeCaptureResources()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun closeCaptureResources() {
+        if (shuttingDown) return
+        shuttingDown = true
+        scheduler.shutdownNow()
+        // detachFd transfers ownership to the JNI relay. VpnNative.stop closes
+        // that raw descriptor before this service releases its foreground slot.
+        runCatching { VpnNative.stop() }
+        runCatching { tun?.close() }
+        tun = null
+    }
 
     private fun checkDesktop(host: String, port: Int) {
         val connected = runCatching {
@@ -96,11 +127,19 @@ class CaptureVpnService : VpnService() {
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
         const val EXTRA_PACKAGE = "package"
+        const val ACTION_STOP = "dev.prayag.apptester.companion.STOP_CAPTURE_VPN"
         private const val CHANNEL_ID = "capture_vpn"
         private const val NOTIFICATION_ID = 22
         private const val MTU = 1500
         private const val CHECK_INTERVAL_SECONDS = 5L
         private const val CONNECT_TIMEOUT_MS = 1500
         private const val MAX_FAILURES = 3
+
+        @Volatile
+        private var instance: CaptureVpnService? = null
+
+        fun stopRunning() {
+            instance?.stopCapture()
+        }
     }
 }

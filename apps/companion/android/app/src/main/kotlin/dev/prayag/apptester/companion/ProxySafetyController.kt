@@ -1,5 +1,6 @@
 package dev.prayag.apptester.companion
 
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -33,9 +34,13 @@ class ProxySafetyController(private val context: Context) {
     fun status(message: String? = null): ProxySafetyStatus {
         val host = preferences.getString(HOST, null)
         val port = preferences.getInt(PORT, 0).takeIf { it > 0 }
+        val vpnActive = isCaptureVpnRunning()
+        if (preferences.getBoolean(VPN_ACTIVE, false) && !vpnActive) {
+            preferences.edit().putBoolean(VPN_ACTIVE, false).apply()
+        }
         return ProxySafetyStatus(
             preferences.getBoolean(MONITORING, false),
-            preferences.getBoolean(VPN_ACTIVE, false),
+            vpnActive,
             host,
             port,
             message ?: preferences.getString(MESSAGE, null),
@@ -44,22 +49,32 @@ class ProxySafetyController(private val context: Context) {
         )
     }
 
-    fun startMonitoring(host: String, port: Int): ProxySafetyStatus {
+    fun startMonitoring(host: String, port: Int, targetPackage: String? = null): ProxySafetyStatus {
         require(host.isNotBlank()) { "Desktop host is required." }
         require(port in 1..65535) { "Proxy port must be between 1 and 65535." }
-        record("Desktop link started for $host:$port")
-        preferences.edit().putString(HOST, host).putInt(PORT, port).putBoolean(MONITORING, true).apply()
+        val endpointChanged = preferences.getString(HOST, null) != host || preferences.getInt(PORT, 0) != port
+        val restartVpn = endpointChanged && preferences.getBoolean(VPN_ACTIVE, false)
+        val message = if (restartVpn) {
+            "Desktop endpoint updated. Stop VPN, then connect it again to apply the new endpoint."
+        } else {
+            "Desktop link ready for $host:$port"
+        }
+        record(message)
+        preferences.edit().putString(HOST, host).putInt(PORT, port).putBoolean(MONITORING, true).also { editor ->
+            if (!targetPackage.isNullOrBlank()) editor.putString(TARGET_PACKAGE, targetPackage)
+        }.apply()
         val intent = Intent(context, ProxySafetyService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
-        return status("Checking $host:$port in the background.")
+        return status(message, vpnActiveOverride = false)
     }
 
     fun stopMonitoring(message: String = "Desktop link stopped. Direct networking is unchanged."): ProxySafetyStatus {
         context.stopService(Intent(context, ProxySafetyService::class.java))
+        context.stopService(Intent(context, CaptureVpnService::class.java))
         record(message)
         preferences.edit().remove(HOST).remove(PORT).remove(TARGET_PACKAGE)
             .putBoolean(MONITORING, false).putBoolean(VPN_ACTIVE, false).apply()
-        return status(message)
+        return status(message, vpnActiveOverride = false)
     }
 
     fun configureVpn(host: String, port: Int, targetPackage: String): ProxySafetyStatus {
@@ -87,10 +102,18 @@ class ProxySafetyController(private val context: Context) {
     }
 
     fun stopVpn(message: String = "VPN capture stopped. Direct networking resumed."): ProxySafetyStatus {
-        context.stopService(Intent(context, CaptureVpnService::class.java))
+        CaptureVpnService.stopRunning()
+        context.sendBroadcast(
+            Intent(CaptureVpnService.ACTION_STOP)
+                .setPackage(context.packageName),
+        )
+        markVpnStopped(message)
+        return status(message, vpnActiveOverride = false)
+    }
+
+    fun markVpnStopped(message: String) {
         preferences.edit().putBoolean(VPN_ACTIVE, false).apply()
         record(message)
-        return status(message)
     }
 
     fun endpoint(): Pair<String, Int>? {
@@ -106,10 +129,25 @@ class ProxySafetyController(private val context: Context) {
         preferences.edit().putStringSet(LOGS, existing.takeLast(MAX_LOGS).toSet()).putString(MESSAGE, message).apply()
     }
 
+    private fun status(message: String?, vpnActiveOverride: Boolean?): ProxySafetyStatus {
+        val host = preferences.getString(HOST, null)
+        val port = preferences.getInt(PORT, 0).takeIf { it > 0 }
+        val vpnActive = vpnActiveOverride ?: isCaptureVpnRunning()
+        return ProxySafetyStatus(preferences.getBoolean(MONITORING, false), vpnActive, host, port, message ?: preferences.getString(MESSAGE, null), preferences.getString(TARGET_PACKAGE, null), readLogs())
+    }
+
     private fun readLogs() = preferences.getStringSet(LOGS, emptySet()).orEmpty()
         .mapNotNull { row -> row.split("|", limit = 2).takeIf { it.size == 2 } }
         .sortedByDescending { it[0] }
         .map { mapOf("time" to it[0], "message" to it[1]) }
+
+    @Suppress("DEPRECATION")
+    private fun isCaptureVpnRunning(): Boolean {
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        return activityManager.getRunningServices(Int.MAX_VALUE).any { service ->
+            service.service.className == CaptureVpnService::class.java.name
+        }
+    }
 
     companion object {
         private const val HOST = "host"

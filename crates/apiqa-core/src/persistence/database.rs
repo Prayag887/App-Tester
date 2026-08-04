@@ -1,6 +1,6 @@
 use crate::{comparison::ComparisonRules, traffic::HttpTransaction};
 use rusqlite::{Connection, params};
-use std::{path::Path, sync::Mutex};
+use std::{path::Path, sync::Mutex, time::Duration};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -15,6 +15,8 @@ pub enum StoreError {
     Poisoned,
     #[error("baseline transaction {0} does not exist")]
     BaselineTransactionMissing(Uuid),
+    #[error("replay failed: {0}")]
+    Replay(String),
 }
 pub struct Database {
     connection: Mutex<Connection>,
@@ -22,6 +24,9 @@ pub struct Database {
 impl Database {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
         let connection = Connection::open(path)?;
+        connection.pragma_update(None, "journal_mode", "WAL")?;
+        connection.pragma_update(None, "synchronous", "NORMAL")?;
+        connection.busy_timeout(Duration::from_secs(5))?;
         super::migrations::apply(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),

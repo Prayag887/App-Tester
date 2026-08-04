@@ -6,24 +6,23 @@ class AndroidProxySafetyRepository implements ProxySafetyRepository {
   static const _channel = MethodChannel('dev.prayag.apptester/proxy_safety');
 
   @override
-  Future<List<Map<String, String>>> installedDebugApps() async {
-    final result = await _channel.invokeListMethod<Map<Object?, Object?>>('installedDebugApps') ?? const [];
-    return result.map((item) => item.map((key, value) => MapEntry('$key', '$value'))).toList();
-  }
-
-  @override
   Future<ProxySafetyStatus> status() => _invoke('status');
 
   @override
-  Future<ProxySafetyStatus> startMonitoring({required String host, required int port}) =>
+  Future<ProxySafetyStatus> startMonitoring(
+          {required String host, required int port}) =>
       _invoke('startMonitoring', {'host': host, 'port': port});
 
   @override
   Future<ProxySafetyStatus> stopMonitoring() => _invoke('stopMonitoring');
 
   @override
-  Future<ProxySafetyStatus> startVpn({required String host, required int port, required String targetPackage}) =>
-      _invoke('startVpn', {'host': host, 'port': port, 'targetPackage': targetPackage});
+  Future<ProxySafetyStatus> startVpn(
+          {required String host,
+          required int port,
+          required String targetPackage}) =>
+      _invoke('startVpn',
+          {'host': host, 'port': port, 'targetPackage': targetPackage});
 
   @override
   Future<ProxySafetyStatus> stopVpn() => _invoke('stopVpn');
