@@ -125,4 +125,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           shasum -a 256 apps/companion/releases/app-tester-companion.apk | awk '{print $1}' > apps/companion/releases/app-tester-companion.apk.sha256
-          gh release upload "${{ github.ref_name }}" apps/companion/releases/app-tester-companion.apk apps/companion/releases/app-tester-companion.apk.sha256 --clobber
+          gh release upload "${{ github.ref_name }}" -R Prayag887/postman-like apps/companion/releases/app-tester-companion.apk apps/companion/releases/app-tester-companion.apk.sha256 --clobber
