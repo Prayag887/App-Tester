@@ -1,4 +1,9 @@
 //! Safe replay of previously captured requests for regression checks.
+
+pub mod daily;
+
+pub use daily::run_daily_replay;
+
 use crate::{
     comparison::{
         ComparisonCompatibility, Difference, DifferenceKind, DifferenceSeverity, DisplayValue,

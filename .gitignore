@@ -22,3 +22,5 @@ scan-results/
 /.agent/
 /.agents/
 /.codex/
+apps/companion/releases/*.apk
+apps/companion/releases/*.sha256

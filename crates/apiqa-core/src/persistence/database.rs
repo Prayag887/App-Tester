@@ -15,6 +15,8 @@ pub enum StoreError {
     Poisoned,
     #[error("baseline transaction {0} does not exist")]
     BaselineTransactionMissing(Uuid),
+    #[error("replay failed: {0}")]
+    Replay(String),
 }
 pub struct Database {
     connection: Mutex<Connection>,

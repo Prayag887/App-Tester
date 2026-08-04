@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+pub mod logcat;
+pub use logcat::{
+    LogcatIncidentBuffer, LogcatSupervisor, emit_incident, foreground_activity_command,
+    is_actionable, logcat_command,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IncidentCategory {
@@ -458,5 +464,66 @@ mod tests {
                 .iter()
                 .any(|step| step.contains("CheckoutActivity"))
         );
+    }
+}
+
+#[cfg(test)]
+mod additional_tests {
+    use super::*;
+
+    fn line(level: &str, message: &str) -> FocusedLogLine {
+        FocusedLogLine {
+            timestamp_ms: 1,
+            level: level.into(),
+            tag: "Example".into(),
+            message: message.into(),
+        }
+    }
+
+    #[test]
+    fn first_application_frame_skips_proxy_and_system_frames() {
+        let lines = vec![
+            line("I", "at com.android.internal.os.ZygoteInit.main"),
+            line("I", "at j$.util.concurrent.ThreadPoolExecutor"),
+            line(
+                "E",
+                "at com.example.app.api.ApiClient.fetch(com.example.app:123)",
+            ),
+            line("E", "at com.example.app$Proxy12.get"),
+        ];
+        assert_eq!(
+            first_application_frame(&lines, "com.example.app").as_deref(),
+            Some("at com.example.app.api.ApiClient.fetch(com.example.app:123)")
+        );
+    }
+
+    #[test]
+    fn first_application_frame_is_none_without_a_package_match() {
+        let lines = vec![line("E", "at com.other.app.Main.run")];
+        assert_eq!(first_application_frame(&lines, "com.example.app"), None);
+    }
+
+    #[test]
+    fn normalize_signature_is_stable_across_ids_ips_and_ports() {
+        // Signatures must be identical for the same failure observed twice,
+        // even when volatile values (ip, port, hex pointers) differ.
+        let message = "connect failed to 192.168.1.42:8443 (0x7f000001)".to_string();
+        let first = normalize_signature(IncidentCategory::Error, &message, Some("com.example.app"));
+        let second =
+            normalize_signature(IncidentCategory::Error, &message, Some("com.example.app"));
+        assert_eq!(first, second);
+        assert!(!first.is_empty());
+        assert!(first.contains("{id}"), "volatile tokens are normalized");
+    }
+
+    #[test]
+    fn normalize_signature_distinguishes_categories_and_frames() {
+        let message = "boom".to_string();
+        let error = normalize_signature(IncidentCategory::Error, &message, None);
+        let warning = normalize_signature(IncidentCategory::Warning, &message, None);
+        assert_ne!(error, warning);
+        let framed =
+            normalize_signature(IncidentCategory::Error, &message, Some("com.example.app"));
+        assert_ne!(error, framed);
     }
 }

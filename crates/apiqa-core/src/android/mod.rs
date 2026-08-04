@@ -10,6 +10,12 @@ use std::{
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+mod ca;
+pub use ca::{
+    AndroidCaChange, AndroidCaState, AndroidCaStatus, certificate_hash, inspect_android_ca,
+    manage_ca_usage, parse_root_ca_probe, protected_ca_status, root_ca_path,
+};
+
 #[derive(Debug, Clone)]
 pub struct QrPairingSecret {
     pub id: Uuid,
@@ -761,5 +767,156 @@ studio-app-tester-123 _adb-tls-pairing._tcp 192.168.1.4:42891\n";
             Some(10228)
         );
         assert_eq!(parse_app_uid("    appId=10228\n"), Some(10228));
+    }
+}
+
+#[cfg(test)]
+mod proxy_management_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    struct RecordingRunner {
+        commands: Mutex<Vec<Vec<String>>>,
+        response: String,
+    }
+    impl AdbRunner for RecordingRunner {
+        fn run(&self, args: &[&str]) -> Result<String, DeviceError> {
+            self.commands
+                .lock()
+                .unwrap()
+                .push(args.iter().map(|arg| (*arg).to_owned()).collect());
+            Ok(self.response.clone())
+        }
+        fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
+            unreachable!("proxy management does not transfer files")
+        }
+    }
+
+    #[test]
+    fn configure_proxy_writes_the_global_setting() {
+        let runner = RecordingRunner {
+            commands: Mutex::new(Vec::new()),
+            response: String::new(),
+        };
+        configure_proxy(&runner, "emulator-5554", "10.0.2.2", 8080).unwrap();
+        assert_eq!(
+            *runner.commands.lock().unwrap(),
+            vec![vec![
+                "-s",
+                "emulator-5554",
+                "shell",
+                "settings",
+                "put",
+                "global",
+                "http_proxy",
+                "10.0.2.2:8080",
+            ]]
+        );
+    }
+
+    #[test]
+    fn clear_proxy_disables_the_global_setting() {
+        let runner = RecordingRunner {
+            commands: Mutex::new(Vec::new()),
+            response: String::new(),
+        };
+        clear_proxy(&runner, "emulator-5554").unwrap();
+        assert_eq!(
+            *runner.commands.lock().unwrap(),
+            vec![vec![
+                "-s",
+                "emulator-5554",
+                "shell",
+                "settings",
+                "put",
+                "global",
+                "http_proxy",
+                ":0",
+            ]]
+        );
+    }
+
+    #[test]
+    fn verify_proxy_returns_the_configured_endpoint_trimmed() {
+        let runner = RecordingRunner {
+            commands: Mutex::new(Vec::new()),
+            response: "10.0.2.2:8080\n".into(),
+        };
+        assert_eq!(
+            verify_proxy(&runner, "emulator-5554").unwrap(),
+            "10.0.2.2:8080"
+        );
+        assert_eq!(
+            *runner.commands.lock().unwrap(),
+            vec![vec![
+                "-s",
+                "emulator-5554",
+                "shell",
+                "settings",
+                "get",
+                "global",
+                "http_proxy",
+            ]]
+        );
+    }
+
+    #[test]
+    fn verify_proxy_reports_an_empty_value_as_disabled() {
+        let runner = RecordingRunner {
+            commands: Mutex::new(Vec::new()),
+            response: "\n".into(),
+        };
+        assert_eq!(verify_proxy(&runner, "emulator-5554").unwrap(), "");
+    }
+
+    #[test]
+    fn open_usb_companion_reverses_the_port_and_launches_configure_only() {
+        let runner = RecordingRunner {
+            commands: Mutex::new(Vec::new()),
+            response: "Starting: Intent".into(),
+        };
+        open_usb_companion(&runner, "usb-serial", 49560, "com.example.app").unwrap();
+        assert_eq!(
+            *runner.commands.lock().unwrap(),
+            vec![
+                vec!["-s", "usb-serial", "reverse", "tcp:49560", "tcp:49560"],
+                vec![
+                    "-s",
+                    "usb-serial",
+                    "shell",
+                    "am",
+                    "start",
+                    "-n",
+                    "dev.prayag.apptester.companion/.MainActivity",
+                    "--es",
+                    "app_tester_host",
+                    "127.0.0.1",
+                    "--ei",
+                    "app_tester_port",
+                    "49560",
+                    "--es",
+                    "app_tester_package",
+                    "com.example.app",
+                    "--ez",
+                    "app_tester_configure_only",
+                    "true",
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn open_usb_companion_validates_before_touching_adb() {
+        struct Unused;
+        impl AdbRunner for Unused {
+            fn run(&self, _: &[&str]) -> Result<String, DeviceError> {
+                panic!("validation must run before ADB")
+            }
+            fn push(&self, _: &str, _: &Path, _: &str) -> Result<String, DeviceError> {
+                panic!("validation must run before ADB")
+            }
+        }
+        assert!(open_usb_companion(&Unused, "usb-serial", 0, "com.example.app").is_err());
+        assert!(open_usb_companion(&Unused, "usb-serial", 49560, "  ").is_err());
     }
 }

@@ -62,6 +62,8 @@ export const pairWithCode = async (host:string, port:number, pairingCode:string)
   invoke("pair_with_code", { host, port, pairingCode });
 export const enableUsbWifi = async (serial:string, port=5555):Promise<QrPairingResult> =>
   invoke("enable_usb_wifi", { serial, port });
+export const captureScreen = async (serial:string):Promise<string> =>
+  invoke("capture_screen", { serial });
 export const prepareAndroidCertificateInstall = async (serial:string):Promise<AndroidCertificateInstall> =>
   invoke("prepare_android_certificate_install", { serial });
 export const getAndroidCaStatus = async (serial:string, connectionType:string):Promise<AndroidCaStatus> =>

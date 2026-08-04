@@ -158,3 +158,19 @@ pre{background:#101827;border-color:#2d3850;color:#cbd2e3}
 @media(max-width:820px){.issue-expanded-content{margin-left:0}}
 
 .icon-button.destructive{color:#ffadb2;border-color:#704653;background:#302331}.icon-button.destructive:hover{background:#432b39;border-color:#9a5967}
+
+/* Device screen mirror panel, third workbench column. */
+.workbench.with-mirror{grid-template-columns:minmax(460px,1fr) minmax(340px,.8fr) minmax(230px,.55fr)}
+.mirror-panel{min-width:0;min-height:0;display:flex;flex-direction:column;border-left:1px solid #303d57;background:#0e1524}
+.mirror-heading{flex:none;display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid #2d3850;color:#9b86d2;font-size:10px;font-weight:800;letter-spacing:.11em}
+.mirror-heading .icon-button{margin:0}
+.mirror-stage{min-height:0;flex:1;display:grid;place-items:center;overflow:auto;padding:10px;background:repeating-conic-gradient(#111a2b 0% 25%,#0e1524 0% 50%) 0 0/18px 18px}
+.mirror-stage img{max-width:100%;max-height:100%;width:auto;height:auto;border-radius:11px;border:1px solid #35415c;box-shadow:0 16px 36px #050a1444}
+.mirror-hint{display:grid;place-items:center;gap:9px;max-width:220px;color:#8f9ab1;font-size:12px;line-height:1.5;text-align:center;padding:20px}
+.mirror-hint svg{color:#a183df;width:22px;height:22px}
+@media(max-width:1150px){.workbench.with-mirror{grid-template-columns:minmax(430px,1fr) minmax(300px,.8fr) minmax(200px,.5fr)}}
+
+/* Two-step destructive confirm: first click arms the button, second deletes. */
+.toolbar>button.confirming{background:#6b2630;border-color:#b44956;color:#ffd9db;animation:confirm-pulse 1.2s ease infinite}
+.toolbar>button.confirming b{color:#ffd9db;margin:0;font-size:12px}
+@keyframes confirm-pulse{50%{box-shadow:0 0 0 5px #b4495633}}
