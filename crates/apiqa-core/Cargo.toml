@@ -25,6 +25,8 @@ similar.workspace = true
 dashmap.workspace = true
 anyhow.workspace = true
 reqwest.workspace = true
+futures-util.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 

@@ -11,6 +11,7 @@
 pub mod adb;
 pub mod android;
 pub mod comparison;
+pub mod composer;
 pub mod correlation;
 pub mod diagnostics;
 pub mod events;

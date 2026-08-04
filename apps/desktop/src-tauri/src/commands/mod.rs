@@ -2,6 +2,7 @@
 
 pub mod certificate;
 pub mod companion;
+pub mod composer;
 pub mod devices;
 pub mod session;
 pub mod traffic;

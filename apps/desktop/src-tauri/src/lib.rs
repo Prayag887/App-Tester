@@ -25,7 +25,7 @@ use androidqa_core::{
 };
 use tauri::Manager;
 
-use commands::{certificate, companion, devices, session as session_commands, traffic};
+use commands::{certificate, companion, composer, devices, session as session_commands, traffic};
 pub use state::{InspectorState, Session};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -103,7 +103,8 @@ pub fn run() {
             traffic::approve_baseline,
             traffic::delete_baseline,
             traffic::get_comparison_rules,
-            traffic::save_comparison_rules
+            traffic::save_comparison_rules,
+            composer::send_request
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|error| {
