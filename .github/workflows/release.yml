@@ -53,6 +53,17 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
+      - name: Configure Android release signing
+        env:
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cat > apps/companion/android/signing.properties <<EOF
+          storeFile=app-tester-ci-release.jks
+          storePassword=$ANDROID_STORE_PASSWORD
+          keyAlias=app-tester-companion
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
       - run: pnpm run companion:build
       - uses: tauri-apps/tauri-action@v1
         env:
@@ -92,6 +103,17 @@ jobs:
           distribution: temurin
           java-version: "17"
       - run: pnpm install --frozen-lockfile
+      - name: Configure Android release signing
+        env:
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cat > apps/companion/android/signing.properties <<EOF
+          storeFile=app-tester-ci-release.jks
+          storePassword=$ANDROID_STORE_PASSWORD
+          keyAlias=app-tester-companion
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
       - run: pnpm run companion:build
       - name: Upload Companion APK to release
         env:
