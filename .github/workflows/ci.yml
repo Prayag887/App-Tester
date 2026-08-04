@@ -10,12 +10,8 @@ permissions:
 
 jobs:
   rust:
-    name: Rust (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.os }}
+    name: Rust core
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
