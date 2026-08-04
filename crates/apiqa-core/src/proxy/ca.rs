@@ -72,4 +72,33 @@ mod tests {
         assert!(load_authority(info.certificate_path.parent().unwrap()).is_ok());
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn openssl_generated_ca_is_loadable() {
+        let root = std::env::temp_dir().join(format!("app-tester-openssl-ca-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let key_path = root.join("app-tester-ca-key.pem");
+        let cert_path = root.join("app-tester-ca.pem");
+        let status = std::process::Command::new("openssl")
+            .args([
+                "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", "3650",
+                "-keyout",
+            ])
+            .arg(&key_path)
+            .args(["-out"])
+            .arg(&cert_path)
+            .args([
+                "-subj",
+                "/CN=App Tester Local Inspection CA/O=App Tester",
+                "-addext",
+                "basicConstraints=critical,CA:TRUE",
+                "-addext",
+                "keyUsage=critical,keyCertSign,cRLSign",
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(load_authority(&root).is_ok());
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

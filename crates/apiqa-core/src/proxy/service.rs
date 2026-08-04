@@ -10,7 +10,7 @@ use std::{
 use tokio::{sync::oneshot, task::JoinHandle};
 use uuid::Uuid;
 
-use super::ca::load_authority;
+use super::ca::{generate_ca, load_authority};
 use super::handler::CaptureHandler;
 use super::model::{ProxyConfiguration, ProxyStatus};
 use crate::{
@@ -89,9 +89,21 @@ impl ProxyService {
             .ca_certificate_path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("invalid CA path"))?;
-        if !config.ca_certificate_path.exists() {
-            self.set_status(ProxyStatus::CertificateRequired);
-            anyhow::bail!("CA certificate is required");
+        let ca_key_path = ca_dir.join("app-tester-ca-key.pem");
+        match (config.ca_certificate_path.is_file(), ca_key_path.is_file()) {
+            (false, false) => {
+                generate_ca(ca_dir).map_err(|error| {
+                    self.set_status(ProxyStatus::CertificateRequired);
+                    anyhow::anyhow!("could not create the local CA certificate: {error}")
+                })?;
+            }
+            (true, true) => {}
+            _ => {
+                self.set_status(ProxyStatus::CertificateRequired);
+                anyhow::bail!(
+                    "the local CA certificate is incomplete; restore both CA files or remove the incomplete certificate-authority directory and try again"
+                );
+            }
         }
         // Let the operating system select an unused port. A fixed capture port
         // makes pairing fail on machines where another process already owns it.
@@ -188,20 +200,22 @@ mod tests {
     use crate::persistence::Database;
 
     #[tokio::test]
-    async fn starts_on_an_os_assigned_port_and_accepts_loopback_connections() {
+    async fn generates_a_missing_ca_then_starts_on_an_os_assigned_port() {
         let root = std::env::temp_dir().join(format!("app-tester-proxy-{}", Uuid::new_v4()));
-        let certificate = crate::proxy::generate_ca(&root).unwrap();
+        let certificate_path = root.join("app-tester-ca.pem");
         let service = ProxyService::new(
             ProxyConfiguration {
                 bind_address: "0.0.0.0".into(),
                 port: 0,
-                ca_certificate_path: certificate.certificate_path,
+                ca_certificate_path: certificate_path.clone(),
                 ca_fingerprint_sha256: None,
             },
             Arc::new(Database::open_in_memory().unwrap()),
             EventBroadcaster::default(),
         );
         service.start(Uuid::new_v4()).await.unwrap();
+        assert!(certificate_path.is_file());
+        assert!(root.join("app-tester-ca-key.pem").is_file());
         let port = service.configuration().port;
         assert_ne!(port, 0);
         assert!(
