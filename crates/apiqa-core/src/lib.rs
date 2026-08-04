@@ -1,4 +1,12 @@
 //! Core Android traffic inspection, device control, diagnostics, and replay.
+//!
+//! Production code must not panic: unwrap/expect/panic are denied outside
+//! `#[cfg(test)]` so every fallible path is handled explicitly.
+
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
 
 pub mod adb;
 pub mod android;

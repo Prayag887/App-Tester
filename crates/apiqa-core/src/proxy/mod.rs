@@ -4,6 +4,7 @@ mod ca;
 mod handler;
 mod model;
 mod service;
+mod stream;
 
 pub use ca::{generate_ca, load_authority};
 pub use handler::{

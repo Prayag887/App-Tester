@@ -23,3 +23,6 @@ reqwest.workspace = true
 qrcode.workspace = true
 rfd = "0.15.4"
 base64 = "0.22"
+
+[lints]
+workspace = true
