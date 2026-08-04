@@ -66,6 +66,9 @@ export const captureScreen = async (serial:string):Promise<string> =>
   invoke("capture_screen", { serial });
 export const sendRequest = async (request: ManualRequest, options: SendOptions): Promise<SendResult> =>
   invoke("send_request", { request, options });
+export interface CurlImport { request: ManualRequest; options: SendOptions }
+export const parseCurl = async (input: string): Promise<CurlImport> =>
+  invoke("parse_curl", { input });
 export const prepareAndroidCertificateInstall = async (serial:string):Promise<AndroidCertificateInstall> =>
   invoke("prepare_android_certificate_install", { serial });
 export const getAndroidCaStatus = async (serial:string, connectionType:string):Promise<AndroidCaStatus> =>

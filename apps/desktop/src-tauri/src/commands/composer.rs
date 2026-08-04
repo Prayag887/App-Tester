@@ -1,11 +1,18 @@
 //! Composer commands: send manually composed requests from the desktop shell.
 
 use androidqa_core::composer::{
+    curl::{CurlImport, parse_curl as parse_curl_core},
     model::{ManualRequest, SendOptions, SendResult},
     send_manual,
 };
 
 use crate::state::InspectorState;
+
+/// Parses a pasted curl command into a request plus transport options.
+#[tauri::command]
+pub fn parse_curl(input: String) -> Result<CurlImport, String> {
+    parse_curl_core(&input).map_err(|error| error.to_string())
+}
 
 /// Sends a composed request, recording it as a transaction in the current
 /// session (same storage, same events as captured traffic).

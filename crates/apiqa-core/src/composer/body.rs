@@ -67,7 +67,7 @@ pub fn encode_urlencoded(fields: &[(String, String)]) -> String {
         .join("&")
 }
 
-fn percent_encode(input: &str) -> String {
+pub fn percent_encode(input: &str) -> String {
     let mut encoded = String::with_capacity(input.len());
     for byte in input.bytes() {
         match byte {

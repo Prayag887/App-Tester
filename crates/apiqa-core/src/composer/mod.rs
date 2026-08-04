@@ -8,6 +8,7 @@
 
 pub mod body;
 pub mod capture;
+pub mod curl;
 pub mod model;
 pub mod send;
 

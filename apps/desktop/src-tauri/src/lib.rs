@@ -104,6 +104,7 @@ pub fn run() {
             traffic::delete_baseline,
             traffic::get_comparison_rules,
             traffic::save_comparison_rules,
+            composer::parse_curl,
             composer::send_request
         ])
         .build(tauri::generate_context!())

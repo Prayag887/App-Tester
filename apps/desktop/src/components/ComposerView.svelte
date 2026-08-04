@@ -2,16 +2,21 @@
   // The manual request composer: build a request, send it through the native
   // engine, and inspect the response. Sent requests also appear in the
   // Traffic lab, because the engine records them like captured traffic.
+  // Pasting a curl command (in the URL bar or the import panel) fills the
+  // whole composer from the native parser.
   import { onMount } from "svelte";
-  import { Plus, Send, Trash2 } from "lucide-svelte";
+  import { Plus, Send, TerminalSquare, Trash2 } from "lucide-svelte";
   import * as api from "../api";
   import { byteSizeLabel, elapsedLabel, prettyJson } from "../lib";
+  import { ui } from "../stores.svelte";
   import type {
     AuthSpec,
     HeaderEntry,
     ManualBody,
     ManualRequest,
+    MultipartField,
     QueryParameter,
+    SendOptions,
     SendResult,
   } from "../types";
 
@@ -35,8 +40,9 @@
   let params = $state<QueryParameter[]>([{ name: "", value: "" }]);
   let headers = $state<HeaderEntry[]>([{ name: "", value: "" }]);
   let tab = $state<"params" | "headers" | "body" | "auth">("params");
-  let bodyKind = $state<"none" | "form" | "raw">("none");
+  let bodyKind = $state<"none" | "form" | "raw" | "multipart">("none");
   let formFields = $state<QueryParameter[]>([{ name: "", value: "" }]);
+  let multipartFields = $state<MultipartField[]>([{ name: "", value: "" }]);
   let rawText = $state("");
   let rawMediaType = $state("application/json");
   let authKind = $state<AuthSpec["kind"]>("none");
@@ -45,6 +51,12 @@
   let basicPassword = $state("");
   let apiKeyName = $state("");
   let apiKeyValue = $state("");
+  // Transport settings carried by an imported curl command (`-k`, `-m`, …).
+  let optionsOverride = $state<SendOptions | null>(null);
+
+  let curlOpen = $state(false);
+  let curlText = $state("");
+  let curlTextarea: HTMLTextAreaElement | undefined;
 
   let busy = $state(false);
   let response = $state<SendResult | null>(null);
@@ -71,6 +83,12 @@
         fields: formFields
           .filter((field) => field.name.trim() !== "")
           .map((field) => [field.name.trim(), field.value]),
+      };
+    }
+    if (bodyKind === "multipart") {
+      return {
+        kind: "multipart",
+        fields: multipartFields.filter((field) => field.name.trim() !== ""),
       };
     }
     if (bodyKind === "raw") {
@@ -112,7 +130,10 @@
     busy = true;
     error = "";
     try {
-      response = await api.sendRequest(wireRequest(), DEFAULT_OPTIONS);
+      response = await api.sendRequest(
+        wireRequest(),
+        optionsOverride ?? DEFAULT_OPTIONS,
+      );
       responseTab = "body";
       pretty = true;
     } catch (cause) {
@@ -124,9 +145,80 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-      event.preventDefault();
-      void send();
+    if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") return;
+    event.preventDefault();
+    if (event.target === curlTextarea) {
+      void applyCurl(curlText);
+      return;
+    }
+    void send();
+  }
+
+  /// Fills the composer from a parsed curl command. Every field the parser
+  /// produces is mapped onto the tabs so the user sees exactly what will
+  /// be sent; the imported transport options (`-k`, `-m`, …) are kept.
+  async function applyCurl(text: string) {
+    if (!text.trim()) return;
+    try {
+      const imported = await api.parseCurl(text);
+      const request = imported.request;
+      method = request.method;
+      url = request.url;
+      params = request.query.length
+        ? request.query.map((entry) => ({ ...entry }))
+        : [{ name: "", value: "" }];
+      headers = request.headers.length
+        ? request.headers.map((entry) => ({ ...entry }))
+        : [{ name: "", value: "" }];
+      const body = request.body;
+      if (body.kind === "form") {
+        bodyKind = "form";
+        formFields = body.fields.map(([name, value]) => ({ name, value }));
+        multipartFields = [{ name: "", value: "" }];
+        rawText = "";
+      } else if (body.kind === "multipart") {
+        bodyKind = "multipart";
+        multipartFields = body.fields.map((field) => ({ ...field }));
+        formFields = [{ name: "", value: "" }];
+        rawText = "";
+      } else if (body.kind === "raw") {
+        bodyKind = "raw";
+        rawText = body.text;
+        rawMediaType = body.media_type ?? "text/plain";
+        formFields = [{ name: "", value: "" }];
+        multipartFields = [{ name: "", value: "" }];
+      } else {
+        bodyKind = "none";
+        formFields = [{ name: "", value: "" }];
+        multipartFields = [{ name: "", value: "" }];
+        rawText = "";
+      }
+      const auth = request.auth;
+      if (auth.kind === "bearer") {
+        authKind = "bearer";
+        bearerToken = auth.token;
+      } else if (auth.kind === "basic") {
+        authKind = "basic";
+        basicUsername = auth.username;
+        basicPassword = auth.password;
+      } else if (auth.kind === "api_key") {
+        authKind = "api_key";
+        apiKeyName = auth.key;
+        apiKeyValue = auth.value;
+      } else {
+        authKind = "none";
+        bearerToken = "";
+        basicUsername = "";
+        basicPassword = "";
+        apiKeyName = "";
+        apiKeyValue = "";
+      }
+      optionsOverride = imported.options;
+      curlOpen = false;
+      error = "";
+      ui.notice = "Imported from curl — review, then send.";
+    } catch (cause) {
+      error = `Could not parse curl: ${String(cause)}`;
     }
   }
 
@@ -188,14 +280,45 @@
         class="url-input"
         bind:this={urlInput}
         value={url}
-        placeholder="https://api.example.com/v1/items"
+        placeholder="https://api.example.com/v1/items — or paste a curl command"
         oninput={(event) => (url = (event.target as HTMLInputElement).value)}
+        onpaste={(event) => {
+          const text = event.clipboardData?.getData("text") ?? "";
+          if (text.trimStart().startsWith("curl")) {
+            event.preventDefault();
+            void applyCurl(text);
+          }
+        }}
       />
+      <button
+        class="icon-button curl-toggle"
+        class:active={curlOpen}
+        title="Import from curl"
+        aria-label="Import from curl"
+        onclick={() => (curlOpen = !curlOpen)}
+      ><TerminalSquare size={15} /></button>
       <button class="primary" disabled={busy} onclick={() => void send()}>
         {#if busy}<span class="spinner" />{:else}<Send size={15} />{/if}
         Send
       </button>
     </div>
+
+    {#if curlOpen}
+      <div class="curl-import">
+        <textarea
+          bind:this={curlTextarea}
+          class="curl-input"
+          rows={4}
+          value={curlText}
+          placeholder={"curl 'https://api.example.com/v1' \\\n  -H 'Authorization: Bearer …'"}
+          oninput={(event) => (curlText = (event.target as HTMLTextAreaElement).value)}
+        />
+        <div class="curl-actions">
+          <span>Paste or type a curl command — it fills the composer. ⌘↵ applies.</span>
+          <button class="primary" onclick={() => void applyCurl(curlText)}>Apply</button>
+        </div>
+      </div>
+    {/if}
 
     <nav class="composer-tabs" aria-label="Request sections">
       <button class:active={tab === "params"} onclick={() => setTab("params")}>Params</button>
@@ -219,6 +342,7 @@
           >
             <option value="none">None</option>
             <option value="form">Form data</option>
+            <option value="multipart">Multipart</option>
             <option value="raw">Raw</option>
           </select>
           {#if bodyKind === "raw"}
@@ -236,6 +360,42 @@
         </div>
         {#if bodyKind === "form"}
           {@render kvRows(formFields)}
+        {:else if bodyKind === "multipart"}
+          {#each multipartFields as field, index (index)}
+            <div class="kv-row">
+              <input
+                value={field.name}
+                placeholder="Name"
+                oninput={(event) =>
+                  (multipartFields[index].name = (event.target as HTMLInputElement).value)}
+              />
+              {#if field.file}
+                <span class="multipart-file" title={field.file ?? ""}>
+                  📎 {field.file}
+                  {field.media_type ? `(${field.media_type})` : ""}
+                </span>
+              {:else}
+                <input
+                  value={field.value ?? ""}
+                  placeholder="Value"
+                  oninput={(event) =>
+                    (multipartFields[index].value =
+                      (event.target as HTMLInputElement).value)}
+                />
+              {/if}
+              <button
+                class="icon-button"
+                aria-label="Remove field"
+                onclick={() => multipartFields.splice(index, 1)}
+              ><Trash2 size={13} /></button>
+            </div>
+          {/each}
+          <button
+            class="add-row"
+            onclick={() => multipartFields.push({ name: "", value: "" })}
+          >
+            <Plus size={13} /> Add field
+          </button>
         {:else if bodyKind === "raw"}
           <textarea
             class="raw-body"

@@ -3118,3 +3118,71 @@ pre {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+/* ---- Composer: curl import + multipart ---- */
+.curl-toggle {
+  flex: none;
+  height: 38px;
+  border-color: #35425e;
+  background: #1c2840;
+}
+.curl-toggle.active {
+  color: #c3b4ec;
+  border-color: #9a7bdb;
+  background: #241f38;
+}
+.curl-import {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #2d3850;
+  background: #0e1626;
+}
+.curl-input {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #35425e;
+  border-radius: 8px;
+  background: #172238;
+  color: #c9d5d1;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.curl-input:focus {
+  outline: 0;
+  border-color: #9a7bdb;
+  box-shadow: 0 0 0 3px #785cb52b;
+}
+.curl-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.curl-actions span {
+  color: #8b97ad;
+  font-size: 12px;
+}
+.curl-actions .primary {
+  background: #2a3f63;
+  border-color: #4a6396;
+  font-weight: 700;
+}
+.multipart-file {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 10px;
+  border: 1px dashed #4a5677;
+  border-radius: 7px;
+  background: #141d31;
+  color: #9fb0d0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+}
