@@ -2,58 +2,22 @@ name: Desktop Bundles
 
 on:
   workflow_dispatch:
+    inputs:
+      companion_apk_url:
+        description: Direct URL to the locally built companion APK release asset.
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  companion:
-    name: Companion APK
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.5.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: apps/companion/vpn_engine/go.mod
-      - name: Configure Android NDK
-        run: |
-          android_sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          "$android_sdk_root/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.0.12077973"
-          echo "ANDROID_NDK_HOME=$android_sdk_root/ndk/27.0.12077973" >> "$GITHUB_ENV"
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run companion:build:qa
-      - uses: actions/upload-artifact@v4
-        with:
-          name: companion-apk
-          path: apps/companion/releases/app-tester-companion.apk
-
   desktop:
     name: Desktop (${{ matrix.name }})
-    needs: companion
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
-            os: macos-latest
-            artifacts: |
-              apps/desktop/src-tauri/target/release/bundle/macos/*
-              apps/desktop/src-tauri/target/release/bundle/dmg/*
           - name: Windows
             os: windows-latest
             artifacts: apps/desktop/src-tauri/target/release/bundle/nsis/*
@@ -76,10 +40,11 @@ jobs:
       - name: Install Linux webview dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - uses: actions/download-artifact@v4
-        with:
-          name: companion-apk
-          path: apps/companion/releases/
+      - name: Download locally built companion APK
+        shell: bash
+        run: |
+          mkdir -p apps/companion/releases
+          curl --fail --location --retry 3 "${{ inputs.companion_apk_url }}" --output apps/companion/releases/app-tester-companion.apk
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir apps/desktop tauri build
       - uses: actions/upload-artifact@v4
