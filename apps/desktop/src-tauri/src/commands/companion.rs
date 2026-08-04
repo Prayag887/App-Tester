@@ -20,7 +20,7 @@ const COMPANION_DOWNLOAD_URL: &str = "https://github.com/Prayag887/postman-like/
 /// The GitHub release that publishes the current Companion APK; auto-install
 /// falls back to this when the app does not bundle a copy.
 const COMPANION_RELEASE_DOWNLOAD_URL: &str =
-    "https://github.com/Prayag887/postman-like/releases/download/v0.2.2/app-tester-companion.apk";
+    "https://github.com/Prayag887/App-Tester/releases/download/v0.2.3/app-tester-companion.apk";
 const COMPANION_REGISTRATION_DEADLINE: Duration = Duration::from_secs(12);
 
 #[derive(Debug, Serialize)]
