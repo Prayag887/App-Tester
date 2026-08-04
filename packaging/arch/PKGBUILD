@@ -1,0 +1,35 @@
+# Maintainer: Prayag <prayag@example.com>
+#
+# AUR-style PKGBUILD for App Tester. Builds the desktop bundle from the
+# vX.Y.Z release tarball. Run `makepkg -si` inside this directory.
+#
+# The companion APK is intentionally NOT bundled: the desktop app downloads
+# it from the GitHub release on demand (see
+# apps/desktop/src-tauri/src/commands/companion.rs). The same AppImage from
+# the GitHub release also works on Arch (X11 and Wayland).
+
+pkgname=app-tester
+pkgver=0.2.6
+pkgrel=1
+pkgdesc="Android QA traffic inspector: capture, inspect, compare and replay HTTP/HTTPS traffic"
+arch=('x86_64')
+url="https://github.com/Prayag887/App-Tester"
+license=('GPL-3.0-only')
+depends=('webkit2gtk-4.1' 'libappindicator-gtk3' 'librsvg' 'patchelf' 'openssl' 'libxdo')
+makedepends=('rust' 'nodejs' 'pnpm' 'base-devel' 'dpkg')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/Prayag887/App-Tester/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/App-Tester-$pkgver"
+  pnpm install --frozen-lockfile
+  pnpm --dir apps/desktop tauri build --bundles deb
+}
+
+package() {
+  cd "$srcdir/App-Tester-$pkgver"
+  bsdtar -xf apps/desktop/src-tauri/target/release/bundle/deb/*.deb \
+    -C "$pkgdir" data.tar.xz
+  bsdtar -xf data.tar.xz -C "$pkgdir"
+  rm -f "$pkgdir/data.tar.xz"
+}
