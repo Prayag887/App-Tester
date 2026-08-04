@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api")>();
-  return { ...actual, deleteAllTransactions: vi.fn().mockResolvedValue(undefined) };
+  return {
+    ...actual,
+    deleteAllTransactions: vi.fn().mockResolvedValue(undefined),
+  };
 });
 import * as api from "./api";
 import {
   captureScreen,
   choosePackage,
+  copySelectedCurl,
   getChangedCount,
   getErrorCount,
   getFailedCount,
@@ -25,7 +29,9 @@ import {
 } from "./stores.svelte";
 import type { AndroidApp, HttpTransaction, LogIncident } from "./types";
 
-const transaction = (overrides: Partial<HttpTransaction> = {}): HttpTransaction =>
+const transaction = (
+  overrides: Partial<HttpTransaction> = {},
+): HttpTransaction =>
   ({
     id: "one",
     session_id: "session",
@@ -40,7 +46,14 @@ const transaction = (overrides: Partial<HttpTransaction> = {}): HttpTransaction 
       body: { storage: "empty" },
       http_version: "HTTP_1_1",
     },
-    response: { status: 200, headers: [], body: { storage: "empty" }, decoded_size: 0, encoded_size: 0, http_version: "HTTP_1_1" },
+    response: {
+      status: 200,
+      headers: [],
+      body: { storage: "empty" },
+      decoded_size: 0,
+      encoded_size: 0,
+      http_version: "HTTP_1_1",
+    },
     timing: { request_started_ms: 1_000 },
     capture_quality: "complete",
     correlated_incidents: [],
@@ -93,19 +106,64 @@ beforeEach(reset);
 
 describe("upsertTransaction", () => {
   it("prepends new transactions and replaces by id", () => {
-    upsertTransaction(transaction({ id: "a", created_at: "2026-07-24T00:00:01Z" }));
-    upsertTransaction(transaction({ id: "b", created_at: "2026-07-24T00:00:02Z" }));
-    upsertTransaction(transaction({ id: "a", created_at: "2026-07-24T00:00:03Z" }));
-    expect(ui.transactions.map(tx => tx.id)).toEqual(["a", "b"]);
+    upsertTransaction(
+      transaction({ id: "a", created_at: "2026-07-24T00:00:01Z" }),
+    );
+    upsertTransaction(
+      transaction({ id: "b", created_at: "2026-07-24T00:00:02Z" }),
+    );
+    upsertTransaction(
+      transaction({ id: "a", created_at: "2026-07-24T00:00:03Z" }),
+    );
+    expect(ui.transactions.map((tx) => tx.id)).toEqual(["a", "b"]);
     expect(ui.transactions[0].created_at).toBe("2026-07-24T00:00:03Z");
+  });
+});
+
+describe("selected cURL copy integration", () => {
+  it("copies the selected transaction's generated cURL, never its URL", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    ui.transactions = [
+      transaction({
+        curl: {
+          compact: "curl https://api.example.test/v1/items",
+          multiline:
+            "curl \\\n+  -X GET \\\n+  'https://api.example.test/v1/items'",
+          redacted: true,
+        },
+      }),
+    ];
+
+    copySelectedCurl();
+
+    expect(writeText).toHaveBeenCalledWith(
+      "curl \\\n+  -X GET \\\n+  'https://api.example.test/v1/items'",
+    );
+    expect(ui.notice).toBe("Copied to clipboard");
+  });
+
+  it("does not write to the clipboard when the selected request has no cURL yet", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    ui.transactions = [transaction()];
+
+    copySelectedCurl();
+
+    expect(writeText).not.toHaveBeenCalled();
+    expect(ui.notice).toBe("No cURL is available for this request");
   });
 });
 
 describe("reconcileTransactions", () => {
   it("merges a fresh read without erasing recent event-delivered rows", () => {
-    upsertTransaction(transaction({ id: "event", created_at: "2026-07-24T00:00:05Z" }));
-    reconcileTransactions([transaction({ id: "db", created_at: "2026-07-24T00:00:01Z" })]);
-    expect(ui.transactions.map(tx => tx.id).sort()).toEqual(["db", "event"]);
+    upsertTransaction(
+      transaction({ id: "event", created_at: "2026-07-24T00:00:05Z" }),
+    );
+    reconcileTransactions([
+      transaction({ id: "db", created_at: "2026-07-24T00:00:01Z" }),
+    ]);
+    expect(ui.transactions.map((tx) => tx.id).sort()).toEqual(["db", "event"]);
   });
 
   it("sorts the merged set newest first", () => {
@@ -114,13 +172,13 @@ describe("reconcileTransactions", () => {
       transaction({ id: "new", created_at: "2026-07-24T00:00:09Z" }),
       transaction({ id: "mid", created_at: "2026-07-24T00:00:05Z" }),
     ]);
-    expect(ui.transactions.map(tx => tx.id)).toEqual(["new", "mid", "old"]);
+    expect(ui.transactions.map((tx) => tx.id)).toEqual(["new", "mid", "old"]);
   });
 
   it("an empty database read never erases the live list", () => {
     upsertTransaction(transaction({ id: "live" }));
     reconcileTransactions([]);
-    expect(ui.transactions.map(tx => tx.id)).toEqual(["live"]);
+    expect(ui.transactions.map((tx) => tx.id)).toEqual(["live"]);
   });
 });
 
@@ -144,15 +202,47 @@ describe("upsertIncident", () => {
 
 describe("getVisibleTransactions", () => {
   const base = [
-    transaction({ id: "get", request: { ...transaction().request, method: "GET", host: "api.one.test", path: "/a" } }),
-    transaction({ id: "post", request: { ...transaction().request, method: "POST", host: "api.two.test", path: "/b" } }),
-    transaction({ id: "fail", request: { ...transaction().request, method: "DELETE", host: "api.three.test", path: "/c" }, response: { status: 500, headers: [], body: { storage: "empty" }, decoded_size: 0, encoded_size: 0, http_version: "HTTP_1_1" } }),
+    transaction({
+      id: "get",
+      request: {
+        ...transaction().request,
+        method: "GET",
+        host: "api.one.test",
+        path: "/a",
+      },
+    }),
+    transaction({
+      id: "post",
+      request: {
+        ...transaction().request,
+        method: "POST",
+        host: "api.two.test",
+        path: "/b",
+      },
+    }),
+    transaction({
+      id: "fail",
+      request: {
+        ...transaction().request,
+        method: "DELETE",
+        host: "api.three.test",
+        path: "/c",
+      },
+      response: {
+        status: 500,
+        headers: [],
+        body: { storage: "empty" },
+        decoded_size: 0,
+        encoded_size: 0,
+        http_version: "HTTP_1_1",
+      },
+    }),
   ];
 
   it("filters by free-text query across method, host, and path", () => {
     ui.transactions = base;
     ui.query = "api.two";
-    expect(getVisibleTransactions().map(tx => tx.id)).toEqual(["post"]);
+    expect(getVisibleTransactions().map((tx) => tx.id)).toEqual(["post"]);
   });
 
   it("filters changed-only and errors-only flags", () => {
@@ -161,23 +251,33 @@ describe("getVisibleTransactions", () => {
     expect(getVisibleTransactions()).toEqual([]);
     ui.changedOnly = false;
     ui.errorsOnly = true;
-    expect(getVisibleTransactions().map(tx => tx.id)).toEqual(["fail"]);
+    expect(getVisibleTransactions().map((tx) => tx.id)).toEqual(["fail"]);
   });
 
   it("exposes correlated incidents under the errors filter", () => {
-    ui.transactions = base.map(tx =>
+    ui.transactions = base.map((tx) =>
       tx.id === "get" ? { ...tx, correlated_incidents: ["incident-id"] } : tx,
     );
     ui.errorsOnly = true;
-    expect(getVisibleTransactions().map(tx => tx.id)).toEqual(["get", "fail"]);
+    expect(getVisibleTransactions().map((tx) => tx.id)).toEqual([
+      "get",
+      "fail",
+    ]);
   });
 
   it("never surfaces CONNECT tunnel rows", () => {
     ui.transactions = [
       ...base,
-      transaction({ id: "connect", request: { ...transaction().request, method: "CONNECT" } }),
+      transaction({
+        id: "connect",
+        request: { ...transaction().request, method: "CONNECT" },
+      }),
     ];
-    expect(getVisibleTransactions().map(tx => tx.id)).toEqual(["get", "post", "fail"]);
+    expect(getVisibleTransactions().map((tx) => tx.id)).toEqual([
+      "get",
+      "post",
+      "fail",
+    ]);
   });
 });
 
@@ -197,7 +297,11 @@ describe("getSelectedTransaction", () => {
 
 describe("getMatchingApps", () => {
   const apps: AndroidApp[] = [
-    { package_name: "com.example.alpha", version_name: "1.0", debuggable: true },
+    {
+      package_name: "com.example.alpha",
+      version_name: "1.0",
+      debuggable: true,
+    },
     { package_name: "com.example.beta", debuggable: false },
   ];
 
@@ -205,7 +309,9 @@ describe("getMatchingApps", () => {
     ui.apps = apps;
     expect(getMatchingApps()).toHaveLength(2);
     ui.packageSearch = "BETA";
-    expect(getMatchingApps().map(app => app.package_name)).toEqual(["com.example.beta"]);
+    expect(getMatchingApps().map((app) => app.package_name)).toEqual([
+      "com.example.beta",
+    ]);
     ui.packageSearch = "nomatch";
     expect(getMatchingApps()).toEqual([]);
   });
@@ -215,7 +321,17 @@ describe("row states and counters", () => {
   it("classifies each visible row once", () => {
     ui.transactions = [
       transaction({ id: "ok" }),
-      transaction({ id: "bad", response: { status: 500, headers: [], body: { storage: "empty" }, decoded_size: 0, encoded_size: 0, http_version: "HTTP_1_1" } }),
+      transaction({
+        id: "bad",
+        response: {
+          status: 500,
+          headers: [],
+          body: { storage: "empty" },
+          decoded_size: 0,
+          encoded_size: 0,
+          http_version: "HTTP_1_1",
+        },
+      }),
     ];
     expect(getRowStates().get("ok")).toBe("Captured");
     expect(getRowStates().get("bad")).toBe("Failed");
@@ -275,7 +391,9 @@ describe("requestDeleteAll", () => {
   });
 
   it("reports failures without clearing the list", async () => {
-    vi.mocked(api.deleteAllTransactions).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(api.deleteAllTransactions).mockRejectedValueOnce(
+      new Error("boom"),
+    );
     ui.transactions = [transaction({ id: "stays" })];
     requestDeleteAll();
     requestDeleteAll();

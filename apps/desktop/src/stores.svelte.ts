@@ -8,7 +8,15 @@
 //! below. Derived values are exported read-only.
 
 import * as api from "./api";
-import { copyToClipboard, endpointId, timeLabel, transactionState, type Screen, type Tab } from "./lib";
+import {
+  copyToClipboard,
+  curlCommand,
+  endpointId,
+  timeLabel,
+  transactionState,
+  type Screen,
+  type Tab,
+} from "./lib";
 import type {
   AndroidApp,
   AndroidDevice,
@@ -50,24 +58,29 @@ export const ui = $state({
 let transactionRefreshInFlight = false;
 
 export function getCapturedTransactions() {
-  return ui.transactions.filter(tx => tx.request.method.toUpperCase() !== "CONNECT");
+  return ui.transactions.filter(
+    (tx) => tx.request.method.toUpperCase() !== "CONNECT",
+  );
 }
 
 export function getVisibleTransactions() {
   const captured = getCapturedTransactions();
-  return captured.filter(tx => {
-    const searchable = `${tx.request.method} ${tx.request.host} ${tx.request.path} ${tx.response?.status ?? ""}`.toLowerCase();
+  return captured.filter((tx) => {
+    const searchable =
+      `${tx.request.method} ${tx.request.host} ${tx.request.path} ${tx.response?.status ?? ""}`.toLowerCase();
     return (
       searchable.includes(ui.query.toLowerCase()) &&
       (!ui.changedOnly || transactionState(tx) === "Changed") &&
-      (!ui.errorsOnly || transactionState(tx) === "Failed" || tx.correlated_incidents.length > 0)
+      (!ui.errorsOnly ||
+        transactionState(tx) === "Failed" ||
+        tx.correlated_incidents.length > 0)
     );
   });
 }
 
 export function getSelectedTransaction() {
   return (
-    getCapturedTransactions().find(tx => tx.id === ui.selectedId) ??
+    getCapturedTransactions().find((tx) => tx.id === ui.selectedId) ??
     getVisibleTransactions()[0]
   );
 }
@@ -75,34 +88,52 @@ export function getSelectedTransaction() {
 /// Memoized per-row classification so the request list never recomputes
 /// `transactionState` for every row on every keystroke.
 export function getRowStates() {
-  return new Map(getVisibleTransactions().map(tx => [tx.id, transactionState(tx)]));
+  return new Map(
+    getVisibleTransactions().map((tx) => [tx.id, transactionState(tx)]),
+  );
 }
 
 export function getSelectedDevice() {
-  return ui.devices.find(item => item.serial === ui.device);
+  return ui.devices.find((item) => item.serial === ui.device);
 }
 
 export function getMatchingApps() {
   const search = ui.packageSearch.trim().toLowerCase();
   return ui.apps
-    .filter(app => !search || `${app.package_name} ${app.version_name ?? ""}`.toLowerCase().includes(search))
+    .filter(
+      (app) =>
+        !search ||
+        `${app.package_name} ${app.version_name ?? ""}`
+          .toLowerCase()
+          .includes(search),
+    )
     .slice(0, search ? 50 : 8);
 }
 
 export function getChangedCount() {
-  return getCapturedTransactions().filter(tx => transactionState(tx) === "Changed").length;
+  return getCapturedTransactions().filter(
+    (tx) => transactionState(tx) === "Changed",
+  ).length;
 }
 
 export function getFailedCount() {
-  return getCapturedTransactions().filter(tx => transactionState(tx) === "Failed").length;
+  return getCapturedTransactions().filter(
+    (tx) => transactionState(tx) === "Failed",
+  ).length;
 }
 
 export function getErrorCount() {
-  return ui.incidents.filter(item => ["crash", "error", "anr"].includes(item.category)).length;
+  return ui.incidents.filter((item) =>
+    ["crash", "error", "anr"].includes(item.category),
+  ).length;
 }
 
 export function getStatusLabel() {
-  return ui.capturing ? "Capturing live" : ui.proxy === "running" ? "Proxy ready" : "Ready to capture";
+  return ui.capturing
+    ? "Capturing live"
+    : ui.proxy === "running"
+      ? "Proxy ready"
+      : "Ready to capture";
 }
 
 export const rowTime = (tx: HttpTransaction) => timeLabel(tx.created_at);
@@ -131,22 +162,37 @@ export function copy(value: string) {
   copyToClipboard(value, () => (ui.notice = "Copied to clipboard"));
 }
 
+/** Copies only the selected request's generated cURL command. */
+export function copySelectedCurl() {
+  const command = curlCommand(getSelectedTransaction());
+  if (!command) {
+    ui.notice = "No cURL is available for this request";
+    return;
+  }
+  copy(command);
+}
+
 export function upsertTransaction(transaction: HttpTransaction) {
   // The native proxy is the authority for the active capture. The WebView's
   // cached session can lag after a reconnect or restore; dropping its event
   // leaves a database row invisible until some unrelated UI refresh.
-  ui.transactions = [transaction, ...ui.transactions.filter(item => item.id !== transaction.id)];
+  ui.transactions = [
+    transaction,
+    ...ui.transactions.filter((item) => item.id !== transaction.id),
+  ];
 }
 
 export function upsertIncident(issue: LogIncident) {
-  const existing = ui.incidents.find(item => item.signature === issue.signature);
+  const existing = ui.incidents.find(
+    (item) => item.signature === issue.signature,
+  );
   const occurrence_count = Math.max(
     issue.occurrence_count,
     existing ? existing.occurrence_count + 1 : 1,
   );
   ui.incidents = [
     { ...issue, occurrence_count },
-    ...ui.incidents.filter(item => item.signature !== issue.signature),
+    ...ui.incidents.filter((item) => item.signature !== issue.signature),
   ].slice(0, 100);
 }
 
@@ -154,8 +200,8 @@ export function reconcileTransactions(fresh: HttpTransaction[]) {
   // Event delivery gives us the lowest-latency update, while the database
   // read repairs anything delivered while the WebView was unavailable. Do
   // not let an empty/stale read erase a transaction that has just arrived.
-  const byId = new Map(ui.transactions.map(item => [item.id, item]));
-  fresh.forEach(item => byId.set(item.id, item));
+  const byId = new Map(ui.transactions.map((item) => [item.id, item]));
+  fresh.forEach((item) => byId.set(item.id, item));
   ui.transactions = [...byId.values()].sort((left, right) =>
     right.created_at.localeCompare(left.created_at),
   );
@@ -179,7 +225,8 @@ export async function refreshProxyStatus() {
     if (ui.capturing && ui.proxy === "running" && next !== "running") {
       ui.capturing = false;
       ui.paused = false;
-      ui.notice = "Capture proxy stopped unexpectedly. Reopen the companion to start a fresh capture.";
+      ui.notice =
+        "Capture proxy stopped unexpectedly. Reopen the companion to start a fresh capture.";
     }
     ui.proxy = next;
   } catch {
@@ -190,11 +237,19 @@ export async function refreshProxyStatus() {
 export async function refreshDevices() {
   try {
     ui.devices = await api.discoverDevices();
-    const nextDevice = ui.devices.some(item => item.serial === ui.device && item.authorization_status === "authorized")
+    const nextDevice = ui.devices.some(
+      (item) =>
+        item.serial === ui.device && item.authorization_status === "authorized",
+    )
       ? ui.device
-      : ui.devices.find(item => item.connection_type === "usb" && item.authorization_status === "authorized")?.serial
-        ?? ui.devices.find(item => item.authorization_status === "authorized")?.serial
-        ?? "";
+      : (ui.devices.find(
+          (item) =>
+            item.connection_type === "usb" &&
+            item.authorization_status === "authorized",
+        )?.serial ??
+        ui.devices.find((item) => item.authorization_status === "authorized")
+          ?.serial ??
+        "");
     if (nextDevice !== ui.device) {
       ui.device = nextDevice;
       // A USB device is normally selected automatically, so load its
@@ -218,7 +273,11 @@ export async function loadApps() {
     // Package discovery can briefly return an incomplete list while ADB is
     // reconnecting. Never clear the target from a live capture because the
     // capture session remains scoped to that package.
-    if (ui.packageName && !ui.capturing && !ui.apps.some(item => item.package_name === ui.packageName)) {
+    if (
+      ui.packageName &&
+      !ui.capturing &&
+      !ui.apps.some((item) => item.package_name === ui.packageName)
+    ) {
       ui.packageName = "";
     }
   } catch (error) {
@@ -228,7 +287,9 @@ export async function loadApps() {
 
 export async function resolveHost() {
   try {
-    ui.desktopHost = await api.getProxyHost(getSelectedDevice()?.connection_type ?? "usb");
+    ui.desktopHost = await api.getProxyHost(
+      getSelectedDevice()?.connection_type ?? "usb",
+    );
   } catch {
     ui.desktopHost = "Unavailable";
   }
@@ -259,7 +320,9 @@ export async function start() {
       const config = await api.getProxyConfiguration();
       await api.configureAndroidProxy(ui.device, host, config.port);
     }
-    await api.startLogcatCapture(ui.device, ui.packageName).catch(() => undefined);
+    await api
+      .startLogcatCapture(ui.device, ui.packageName)
+      .catch(() => undefined);
     ui.transactions = [];
     ui.incidents = [];
     ui.selectedId = "";
@@ -277,7 +340,8 @@ export async function start() {
 export async function stop() {
   ui.busy = true;
   try {
-    if (ui.device && getSelectedDevice()?.connection_type === "emulator") await api.clearAndroidProxy(ui.device);
+    if (ui.device && getSelectedDevice()?.connection_type === "emulator")
+      await api.clearAndroidProxy(ui.device);
     await api.stopProxy();
     ui.capturing = false;
     ui.paused = false;
@@ -294,14 +358,22 @@ export async function connectCompanion() {
   try {
     const current = getSelectedDevice();
     if (!current) throw new Error("Choose an authorized Android device first.");
-    if (current.connection_type !== "usb") throw new Error("Companion capture requires a USB-connected Android device.");
-    if (!ui.packageName) throw new Error("Choose the target package before opening the companion.");
+    if (current.connection_type !== "usb")
+      throw new Error(
+        "Companion capture requires a USB-connected Android device.",
+      );
+    if (!ui.packageName)
+      throw new Error(
+        "Choose the target package before opening the companion.",
+      );
     const connection = await api.openUsbCompanion(ui.device, ui.packageName);
     ui.activeSessionId = connection.session_id;
     ui.capturing = true;
     ui.transactions = [];
     await refreshTransactions();
-    await api.startLogcatCapture(ui.device, ui.packageName).catch(() => undefined);
+    await api
+      .startLogcatCapture(ui.device, ui.packageName)
+      .catch(() => undefined);
     ui.notice = `Desktop capture endpoint is ready on port ${connection.port}. On your phone, stop and reconnect VPN once to apply this endpoint.`;
   } catch (error) {
     ui.notice = `Could not open companion: ${String(error)}`;
@@ -394,7 +466,8 @@ export async function captureScreen() {
 export async function approveBaseline(tx: HttpTransaction) {
   const id = endpointId(tx);
   if (!id) {
-    ui.notice = "This response does not have a comparable endpoint identity yet.";
+    ui.notice =
+      "This response does not have a comparable endpoint identity yet.";
     return;
   }
   try {
