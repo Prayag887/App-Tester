@@ -19,6 +19,15 @@ use crate::{
     traffic::HttpTransaction,
 };
 
+/// Locks a mutex, recovering from poisoning. A poisoned lock only means a
+/// previous holder panicked while holding it; the guarded state is still
+/// valid, so panicking again would only escalate.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub struct ProxyService {
     status: Arc<Mutex<ProxyStatus>>,
     config: Mutex<ProxyConfiguration>,
@@ -50,10 +59,10 @@ impl ProxyService {
         }
     }
     pub fn status(&self) -> ProxyStatus {
-        *self.status.lock().expect("proxy status lock")
+        *lock(&self.status)
     }
     pub fn configuration(&self) -> ProxyConfiguration {
-        self.config.lock().expect("proxy config lock").clone()
+        lock(&self.config).clone()
     }
     pub fn events(&self) -> EventBroadcaster {
         self.events.clone()
@@ -76,7 +85,7 @@ impl ProxyService {
         Ok(())
     }
     fn set_status(&self, status: ProxyStatus) {
-        *self.status.lock().expect("proxy status lock") = status;
+        *lock(&self.status) = status;
         self.events.send(InspectorEvent::ProxyStatusChanged(status));
     }
     pub async fn start(&self, session_id: Uuid) -> anyhow::Result<()> {
@@ -116,7 +125,7 @@ impl ProxyService {
         reservation.set_nonblocking(true)?;
         let listener = tokio::net::TcpListener::from_std(reservation)?;
         config.port = bind_address.port();
-        *self.config.lock().expect("proxy config lock") = config.clone();
+        *lock(&self.config) = config.clone();
         let ca = load_authority(ca_dir)?;
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let handler = CaptureHandler {
@@ -142,7 +151,7 @@ impl ProxyService {
         let events = self.events.clone();
         let task = tokio::spawn(async move {
             if proxy.start().await.is_err() {
-                *status.lock().expect("proxy status lock") = ProxyStatus::Failed;
+                *lock(&status) = ProxyStatus::Failed;
                 events.send(InspectorEvent::ProxyStatusChanged(ProxyStatus::Failed));
             }
         });
@@ -174,16 +183,16 @@ impl ProxyService {
             self.set_status(ProxyStatus::Failed);
             anyhow::bail!("capture proxy did not become reachable at {bind_address}");
         }
-        *self.shutdown.lock().expect("shutdown lock") = Some(shutdown_tx);
-        *self.task.lock().expect("task lock") = Some(task);
+        *lock(&self.shutdown) = Some(shutdown_tx);
+        *lock(&self.task) = Some(task);
         self.set_status(ProxyStatus::Running);
         Ok(())
     }
     pub async fn stop(&self) {
-        if let Some(sender) = self.shutdown.lock().expect("shutdown lock").take() {
+        if let Some(sender) = lock(&self.shutdown).take() {
             let _ = sender.send(());
         }
-        let task = self.task.lock().expect("task lock").take();
+        let task = lock(&self.task).take();
         if let Some(task) = task {
             let _ = task.await;
         }

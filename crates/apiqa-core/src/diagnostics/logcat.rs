@@ -283,7 +283,10 @@ impl LogcatSupervisor {
                 reconnect_delay = (reconnect_delay * 2).min(MAX_RECONNECT_DELAY);
             }
         });
-        *self.task.lock().expect("logcat task lock") = Some(task);
+        *self
+            .task
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(task);
     }
 }
 

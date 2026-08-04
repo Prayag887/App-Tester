@@ -12,6 +12,15 @@ use androidqa_core::{
 };
 use uuid::Uuid;
 
+/// Locks a mutex, recovering from poisoning. A poisoned lock only means a
+/// previous holder panicked while holding it; the guarded state is still
+/// valid, so panicking again would only escalate.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Mutable capture-session coordination. Grouped so lock acquisition and the
 /// process-local fallback for the session id live in exactly one place.
 pub struct Session {
@@ -38,56 +47,41 @@ impl Session {
     }
 
     pub fn id(&self) -> Option<Uuid> {
-        *self.session_id.lock().expect("session lock poisoned")
+        *lock(&self.session_id)
     }
 
     pub fn set_id(&self, id: Uuid) {
-        *self.session_id.lock().expect("session lock poisoned") = Some(id);
+        *lock(&self.session_id) = Some(id);
     }
 
     /// Returns the current id or creates and stores a fresh one.
     pub fn id_or_new(&self) -> Uuid {
-        let mut session_id = self.session_id.lock().expect("session lock poisoned");
+        let mut session_id = lock(&self.session_id);
         *session_id.get_or_insert_with(Uuid::new_v4)
     }
 
     pub fn logcat(&self) -> std::sync::MutexGuard<'_, Option<LogcatSupervisor>> {
-        self.logcat.lock().expect("logcat lock poisoned")
+        lock(&self.logcat)
     }
 
     pub fn take_companion_device(&self) -> Option<String> {
-        self.companion_device
-            .lock()
-            .expect("companion device lock poisoned")
-            .take()
+        lock(&self.companion_device).take()
     }
 
     pub fn set_companion_device(&self, serial: String) {
-        *self
-            .companion_device
-            .lock()
-            .expect("companion device lock poisoned") = Some(serial);
+        *lock(&self.companion_device) = Some(serial);
     }
 
     pub fn configured_device(&self) -> Option<String> {
-        self.configured_device
-            .lock()
-            .expect("device proxy lock poisoned")
-            .clone()
+        lock(&self.configured_device).clone()
     }
 
     pub fn set_configured_device(&self, serial: String) {
-        *self
-            .configured_device
-            .lock()
-            .expect("device proxy lock poisoned") = Some(serial);
+        *lock(&self.configured_device) = Some(serial);
     }
 
     pub fn clear_configured_device(&self, serial: &str) {
-        let mut configured = self
-            .configured_device
-            .lock()
-            .expect("device proxy lock poisoned");
+        let mut configured = lock(&self.configured_device);
         if configured.as_deref() == Some(serial) {
             *configured = None;
         }

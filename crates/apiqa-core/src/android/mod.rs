@@ -307,10 +307,17 @@ pub fn stop_usb_companion_capture(runner: &dyn AdbRunner, serial: &str) -> Resul
     Ok(())
 }
 
+/// The literal route regex, compiled once per process.
+#[allow(clippy::expect_used)] // infallible: pattern is a source literal
+fn wifi_ipv4_regex() -> &'static regex::Regex {
+    static REGEX: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    REGEX.get_or_init(|| {
+        regex::Regex::new(r"\bsrc ((?:\d{1,3}\.){3}\d{1,3})\b").expect("valid IP route regex")
+    })
+}
+
 pub fn parse_wifi_ipv4(routes: &str) -> Option<String> {
-    let expression =
-        Regex::new(r"\bsrc ((?:\d{1,3}\.){3}\d{1,3})\b").expect("valid IP route regex");
-    expression
+    wifi_ipv4_regex()
         .captures(routes)
         .and_then(|captures| captures.get(1))
         .map(|address| address.as_str().to_owned())
@@ -461,6 +468,7 @@ pub fn app_uid(
 }
 
 /// Extracts the foreground activity component from `dumpsys window` or activity output.
+#[allow(clippy::expect_used)] // infallible: regex::escape output is always a valid pattern
 pub fn parse_foreground_activity(output: &str, package_name: &str) -> Option<String> {
     let expression = Regex::new(&format!(r"{}\/[^\s}}]+", regex::escape(package_name)))
         .expect("valid foreground activity regex");
@@ -478,10 +486,18 @@ fn parse_package_list_uid(output: &str, package_name: &str) -> Option<u32> {
     })
 }
 
+/// The literal package UID regex, compiled once per process.
+#[allow(clippy::expect_used)] // infallible: pattern is a source literal
+fn package_uid_regex() -> &'static regex::Regex {
+    static REGEX: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    REGEX.get_or_init(|| {
+        regex::Regex::new(r"(?m)^\s*(?:userId|appId)\s*=\s*(\d+)\b")
+            .expect("valid package UID regex")
+    })
+}
+
 fn parse_app_uid(package_dump: &str) -> Option<u32> {
-    let expression =
-        Regex::new(r"(?m)^\s*(?:userId|appId)\s*=\s*(\d+)\b").expect("valid package UID regex");
-    expression
+    package_uid_regex()
         .captures(package_dump)
         .and_then(|captures| captures.get(1))
         .and_then(|uid| uid.as_str().parse().ok())

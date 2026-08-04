@@ -79,17 +79,29 @@ pub fn parse_logcat_epoch_line(line: &str) -> Option<FocusedLogLine> {
     })
 }
 
+/// The literal log redaction patterns, compiled once per process instead of
+/// once per logcat line.
+#[allow(clippy::expect_used)] // infallible: patterns are source literals
+fn redaction_regexes() -> &'static [regex::Regex; 2] {
+    static REDACTION_REGEXES: std::sync::OnceLock<[regex::Regex; 2]> = std::sync::OnceLock::new();
+    REDACTION_REGEXES.get_or_init(|| {
+        [
+            Regex::new(r"\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}\b")
+                .expect("valid JWT pattern"),
+            Regex::new(
+                r#"(?i)(\"?(?:authorization|access[_-]?token|refresh[_-]?token|firebase(?:authentication|installation)?id|sessionid|session_id|token|mobile_no|username)\"?\s*[:=]\s*\"?)([^\",\s}]+)"#,
+            )
+            .expect("valid sensitive log value pattern"),
+        ]
+    })
+}
+
 /// Redacts authentication and analytics values before Logcat reaches storage,
 /// the UI, or a copied developer report.
 pub fn redact_log_message(message: &str) -> String {
-    let jwt =
-        Regex::new(r"\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}\b").expect("valid JWT pattern");
-    let sensitive_value = Regex::new(
-        r#"(?i)(\"?(?:authorization|access[_-]?token|refresh[_-]?token|firebase(?:authentication|installation)?id|sessionid|session_id|token|mobile_no|username)\"?\s*[:=]\s*\"?)([^\",\s}]+)"#,
-    )
-    .expect("valid sensitive log value pattern");
-    let without_jwts = jwt.replace_all(message, "[REDACTED_JWT]");
-    sensitive_value
+    let regexes = redaction_regexes();
+    let without_jwts = regexes[0].replace_all(message, "[REDACTED_JWT]");
+    regexes[1]
         .replace_all(&without_jwts, "${1}[REDACTED]")
         .into_owned()
 }
@@ -228,16 +240,24 @@ fn reproduction_steps(
     steps
 }
 
+/// The literal signature-normalization pattern, compiled once per process.
+#[allow(clippy::expect_used)] // infallible: pattern is a source literal
+fn signature_ids_regex() -> &'static regex::Regex {
+    static REGEX: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"\b(?:0x[0-9a-fA-F]+|\d{3,}|[0-9a-fA-F]{8}-[0-9a-fA-F-]{27})\b")
+            .expect("valid signature id pattern")
+    })
+}
+
 pub fn normalize_signature(
     category: IncidentCategory,
     message: &str,
     frame: Option<&str>,
 ) -> String {
-    let ids = Regex::new(r"\b(?:0x[0-9a-fA-F]+|\d{3,}|[0-9a-fA-F]{8}-[0-9a-fA-F-]{27})\b")
-        .expect("valid regex");
     format!(
         "{category:?}|{}|{}",
-        ids.replace_all(message, "{id}"),
+        signature_ids_regex().replace_all(message, "{id}"),
         frame.unwrap_or("")
     )
 }
