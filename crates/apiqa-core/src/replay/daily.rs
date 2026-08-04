@@ -1,6 +1,6 @@
 //! Regression replay of yesterday's captured traffic.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use time::{OffsetDateTime, PrimitiveDateTime, Time};
 
@@ -18,7 +18,7 @@ const REPLAY_TIMEOUT: Duration = Duration::from_secs(30);
 /// and midnight of the previous UTC day, stores the results in the database,
 /// and streams a `TransactionCompleted` event per replay.
 pub async fn run_daily_replay(
-    database: &Database,
+    database: Arc<Database>,
     events: EventBroadcaster,
     session_id: Uuid,
 ) -> Result<ReplaySummary, StoreError> {
@@ -28,7 +28,7 @@ pub async fn run_daily_replay(
         .ok_or_else(|| StoreError::Replay("could not calculate yesterday".into()))?;
     let start = PrimitiveDateTime::new(yesterday, Time::MIDNIGHT).assume_utc();
     let end = PrimitiveDateTime::new(today, Time::MIDNIGHT).assume_utc();
-    let baselines = database.transactions_between(start, end)?;
+    let baselines = database.transactions_between_async(start, end).await?;
     let client = reqwest::Client::builder()
         .timeout(REPLAY_TIMEOUT)
         .build()
@@ -53,7 +53,7 @@ pub async fn run_daily_replay(
                 summary.changed += 1;
             }
         }
-        database.upsert_transaction(&result)?;
+        database.upsert_async(result.clone()).await?;
         events.send(InspectorEvent::TransactionCompleted(result));
     }
     Ok(summary)
@@ -133,7 +133,7 @@ mod tests {
 
     #[tokio::test]
     async fn replays_yesterdays_transactions_and_reports_summary() {
-        let database = Database::open_in_memory().unwrap();
+        let database = Arc::new(Database::open_in_memory().unwrap());
         let port = serve_json_response().await;
         let today = OffsetDateTime::now_utc().date();
         let yesterday = today.previous_day().unwrap();
@@ -158,7 +158,7 @@ mod tests {
         database.upsert_transaction(&redacted).unwrap();
         let events = EventBroadcaster::default();
         let mut receiver = events.subscribe();
-        let summary = run_daily_replay(&database, events, Uuid::new_v4())
+        let summary = run_daily_replay(database, events, Uuid::new_v4())
             .await
             .unwrap();
         assert_eq!(summary.attempted, 1);
@@ -174,12 +174,12 @@ mod tests {
 
     #[tokio::test]
     async fn ignores_todays_transactions() {
-        let database = Database::open_in_memory().unwrap();
+        let database = Arc::new(Database::open_in_memory().unwrap());
         let port = serve_json_response().await;
         let now = OffsetDateTime::now_utc();
         let today_transaction = baseline("127.0.0.1", port, now);
         database.upsert_transaction(&today_transaction).unwrap();
-        let summary = run_daily_replay(&database, EventBroadcaster::default(), Uuid::new_v4())
+        let summary = run_daily_replay(database, EventBroadcaster::default(), Uuid::new_v4())
             .await
             .unwrap();
         assert_eq!(summary.attempted, 0);

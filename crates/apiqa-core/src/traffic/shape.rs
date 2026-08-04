@@ -1,15 +1,30 @@
 //! Endpoint path normalization and JSON request-shape hashing.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use super::model::BodyStorage;
 
+/// The literal regexes used for path normalization, compiled once per
+/// process instead of on every request.
+#[allow(clippy::expect_used)] // infallible: patterns are source literals exercised by tests
+fn static_regexes() -> &'static [regex::Regex; 2] {
+    static REGEXES: OnceLock<[regex::Regex; 2]> = OnceLock::new();
+    REGEXES.get_or_init(|| {
+        [
+            regex::Regex::new(r"(?i)^[0-9a-f]{8}-[0-9a-f-]{27}$").expect("valid uuid regex"),
+            regex::Regex::new(r"(?i)^[0-9a-f]{16,}$").expect("valid hex regex"),
+        ]
+    })
+}
+
 pub fn normalize_path(path: &str) -> String {
-    let uuid = regex::Regex::new(r"(?i)^[0-9a-f]{8}-[0-9a-f-]{27}$").expect("valid uuid regex");
-    let hex = regex::Regex::new(r"(?i)^[0-9a-f]{16,}$").expect("valid hex regex");
+    let regexes = static_regexes();
     path.split('/')
         .map(|segment| {
-            if segment.parse::<u64>().is_ok() || uuid.is_match(segment) || hex.is_match(segment) {
+            if segment.parse::<u64>().is_ok()
+                || regexes[0].is_match(segment)
+                || regexes[1].is_match(segment)
+            {
                 "{id}"
             } else {
                 segment

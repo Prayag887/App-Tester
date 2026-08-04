@@ -135,7 +135,8 @@ pub async fn test_yesterdays_apis(
     let end = PrimitiveDateTime::new(today, Time::MIDNIGHT).assume_utc();
     let baselines = state
         .database
-        .transactions_between(start, end)
+        .transactions_between_async(start, end)
+        .await
         .map_err(|error| error.to_string())?;
     let session_id = state.session.id_or_new();
     let client = reqwest::Client::builder()
@@ -164,7 +165,8 @@ pub async fn test_yesterdays_apis(
         }
         state
             .database
-            .upsert_transaction(&result)
+            .upsert_async(result.clone())
+            .await
             .map_err(|error| error.to_string())?;
         state
             .proxy

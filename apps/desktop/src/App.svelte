@@ -25,8 +25,12 @@
     void refreshDevices();
     // Traffic and proxy state arrive as live push events from the native
     // bridge; no polling is needed for them. Only device discovery is
-    // inherently poll-based, and it is a single cheap ADB call.
-    const deviceTimer = window.setInterval(refreshDevices, 750);
+    // inherently poll-based. The poll backs off while the window is
+    // backgrounded (devices cannot change while the user is not looking,
+    // and the focus handler below repairs any gap on return).
+    const deviceTimer = window.setInterval(() => {
+      if (!document.hidden) void refreshDevices();
+    }, 2000);
     // The WebView can miss push events while suspended or restored; a single
     // reconcile on focus repairs any gap without constant polling.
     const onFocus = () => {

@@ -1,6 +1,10 @@
 use crate::{comparison::ComparisonRules, traffic::HttpTransaction};
 use rusqlite::{Connection, params};
-use std::{path::Path, sync::Mutex, time::Duration};
+use std::{
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -13,6 +17,8 @@ pub enum StoreError {
     Json(#[from] serde_json::Error),
     #[error("database lock poisoned")]
     Poisoned,
+    #[error("database task failed: {0}")]
+    Task(#[from] tokio::task::JoinError),
     #[error("baseline transaction {0} does not exist")]
     BaselineTransactionMissing(Uuid),
     #[error("replay failed: {0}")]
@@ -213,6 +219,42 @@ impl Database {
             })?
             .unwrap_or_default())
     }
+
+    /// Writes a transaction from an async context. SQLite is synchronous, so
+    /// the write hops to a blocking thread; running it inline on a tokio
+    /// worker would stall the capture proxy and every other command.
+    pub async fn upsert_async(
+        self: &Arc<Self>,
+        transaction: HttpTransaction,
+    ) -> Result<(), StoreError> {
+        let database = Arc::clone(self);
+        tokio::task::spawn_blocking(move || database.upsert_transaction(&transaction)).await?
+    }
+
+    pub async fn pinned_baseline_async(
+        self: &Arc<Self>,
+        endpoint_id: String,
+    ) -> Result<Option<HttpTransaction>, StoreError> {
+        let database = Arc::clone(self);
+        tokio::task::spawn_blocking(move || database.pinned_baseline(&endpoint_id)).await?
+    }
+
+    pub async fn comparison_rules_async(
+        self: &Arc<Self>,
+        endpoint_id: String,
+    ) -> Result<ComparisonRules, StoreError> {
+        let database = Arc::clone(self);
+        tokio::task::spawn_blocking(move || database.comparison_rules(&endpoint_id)).await?
+    }
+
+    pub async fn transactions_between_async(
+        self: &Arc<Self>,
+        start: OffsetDateTime,
+        end: OffsetDateTime,
+    ) -> Result<Vec<HttpTransaction>, StoreError> {
+        let database = Arc::clone(self);
+        tokio::task::spawn_blocking(move || database.transactions_between(start, end)).await?
+    }
 }
 
 #[cfg(test)]
@@ -225,6 +267,40 @@ mod tests {
         let count: i64 = db.connection().unwrap().query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE 'navigation_%'", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn async_variants_round_trip_baselines_and_rules() {
+        let database = Arc::new(Database::open_in_memory().unwrap());
+        let transaction: HttpTransaction = serde_json::from_value(serde_json::json!({
+            "id": uuid::Uuid::new_v4(), "session_id": uuid::Uuid::new_v4(), "connection_id": uuid::Uuid::new_v4(),
+            "request": {"method":"GET","scheme":"https","host":"api.test","path":"/v1","query":[],"headers":[],"body":{"storage":"empty"},"http_version":"HTTP_1_1"},
+            "state": "response_complete", "timing": {"request_started_ms": 0}, "capture_quality": "complete",
+            "correlated_incidents": [], "created_at": "2026-07-24T00:00:00Z", "updated_at": "2026-07-24T00:00:00Z"
+        }))
+        .unwrap();
+        database.upsert_async(transaction.clone()).await.unwrap();
+        database
+            .approve_baseline("GET api.test /v1", transaction.id)
+            .unwrap();
+        let pinned = database
+            .pinned_baseline_async("GET api.test /v1".into())
+            .await
+            .unwrap();
+        assert_eq!(pinned.unwrap().id, transaction.id);
+        let rules = ComparisonRules {
+            ignored_json_pointers: vec!["$.token".into()].into_iter().collect(),
+            volatile_keys: vec!["timestamp".into()].into_iter().collect(),
+        };
+        database
+            .save_comparison_rules("GET api.test /v1", &rules)
+            .unwrap();
+        let loaded = database
+            .comparison_rules_async("GET api.test /v1".into())
+            .await
+            .unwrap();
+        assert_eq!(loaded.ignored_json_pointers, rules.ignored_json_pointers);
+        assert_eq!(loaded.volatile_keys, rules.volatile_keys);
     }
 
     #[test]

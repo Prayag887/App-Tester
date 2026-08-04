@@ -2,6 +2,14 @@
 //!
 //! All behavior lives in [`state`] (shared state), [`adb`] (cached ADB
 //! access), [`bridge`] (event forwarding), and the [`commands`] modules.
+//!
+//! Production code must not panic: unwrap/expect/panic are denied outside
+//! `#[cfg(test)]` so every fallible path is handled explicitly.
+
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
 
 mod adb;
 mod bridge;
@@ -98,7 +106,12 @@ pub fn run() {
             traffic::save_comparison_rules
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build App Tester")
+        .unwrap_or_else(|error| {
+            // The shell cannot run without a valid application: report and
+            // exit rather than panicking across the webview boundary.
+            eprintln!("failed to build App Tester: {error}");
+            std::process::exit(1);
+        })
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let state = app_handle.state::<InspectorState>();
