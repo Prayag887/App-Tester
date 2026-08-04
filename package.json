@@ -12,7 +12,7 @@
     "desktop:build": "pnpm --dir apps/desktop tauri build",
     "build": "pnpm run companion:build && pnpm run desktop:build",
     "check": "pnpm run qa:production",
-    "qa:production": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && pnpm --dir apps/desktop check && pnpm --dir apps/desktop build && pnpm run companion:check && pnpm run companion:build:qa",
+    "qa:production": "pnpm run companion:check && pnpm run companion:build:qa && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && pnpm --dir apps/desktop check && pnpm --dir apps/desktop build",
     "format": "cargo fmt --all && pnpm --dir apps/desktop format"
   }
 }
