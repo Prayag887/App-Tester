@@ -51,13 +51,17 @@ jobs:
         include:
           - name: macOS
             os: macos-latest
-            artifacts: apps/desktop/src-tauri/target/release/bundle/{macos,dmg}/*
+            artifacts: |
+              apps/desktop/src-tauri/target/release/bundle/macos/*
+              apps/desktop/src-tauri/target/release/bundle/dmg/*
           - name: Windows
             os: windows-latest
             artifacts: apps/desktop/src-tauri/target/release/bundle/nsis/*
           - name: Linux
             os: ubuntu-22.04
-            artifacts: apps/desktop/src-tauri/target/release/bundle/{appimage,deb}/*
+            artifacts: |
+              apps/desktop/src-tauri/target/release/bundle/appimage/*
+              apps/desktop/src-tauri/target/release/bundle/deb/*
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
