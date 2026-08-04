@@ -63,15 +63,19 @@ jobs:
           - name: macOS Apple Silicon
             platform: macos-latest
             args: --target aarch64-apple-darwin
+            assetNamePattern: App_Tester_[version]_macOS_Apple_Silicon.[ext]
           - name: macOS Intel
             platform: macos-latest
             args: --target x86_64-apple-darwin
+            assetNamePattern: App_Tester_[version]_macOS_Intel.[ext]
           - name: Windows
             platform: windows-latest
             args: --bundles nsis
+            assetNamePattern: App_Tester_[version]_Windows.[ext]
           - name: Linux
             platform: ubuntu-22.04
-            args: --bundles deb
+            args: --bundles appimage,deb
+            assetNamePattern: App_Tester_[version]_Linux.[ext]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -103,13 +107,26 @@ jobs:
           tauriScript: pnpm tauri
           tagName: v__VERSION__
           releaseName: App Tester v__VERSION__
-          releaseBody: Installers for macOS (Apple Silicon and Intel), Windows, and Linux. App Tester is local-first and sends no telemetry.
+          releaseBody: |
+            App Tester is local-first and sends no telemetry.
+
+            ## Downloads
+            - **macOS Apple Silicon** (M1/M2/M3/M4): `App_Tester_[version]_macOS_Apple_Silicon.dmg`
+            - **macOS Intel**: `App_Tester_[version]_macOS_Intel.dmg`
+            - **Windows**: `App_Tester_[version]_Windows.exe`
+            - **Linux**: `App_Tester_[version]_Linux.AppImage` (self-contained, no dependencies) or the `.deb`
+            - **Android companion**: `app-tester-companion.apk` (arm64; the desktop app installs it automatically over USB)
+
+            ## Notes
+            - **macOS**: the app is ad-hoc signed but not notarized (no Apple Developer certificate). If Gatekeeper blocks it, right-click the app and choose Open, then Open again in the dialog.
+            - **Windows**: SmartScreen may warn about an unsigned installer; choose More info > Run anyway.
+            - **Linux**: the AppImage is self-contained (`chmod +x App_Tester_*.AppImage`). The `.deb` requires WebKitGTK 4.1 and other runtime libraries.
           releaseDraft: false
           prerelease: false
           generateReleaseNotes: true
           args: ${{ matrix.args }}
           retryAttempts: 2
-          releaseAssetNamePattern: "App_Tester_[version]_[platform]_[arch].[ext]"
+          releaseAssetNamePattern: ${{ matrix.assetNamePattern }}
 
   companion-release-upload:
     name: Companion release upload
