@@ -37,6 +37,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/companion/vpn_engine/go.mod
       - name: Configure Android NDK
         run: |
           android_sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
