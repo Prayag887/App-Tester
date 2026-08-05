@@ -2,7 +2,7 @@
 //! every function is a deterministic mapping over plain values, which keeps
 //! them unit-testable in isolation.
 
-import type { BodyStorage, HttpTransaction } from "./types";
+import type { BodyStorage, HttpTransaction, ManualBody, ManualRequest } from "./types";
 
 export type Screen = "traffic" | "logs" | "composer";
 export type Tab =
@@ -95,4 +95,36 @@ export const unresolvedVariables = (text: string, known: string[]): string[] => 
     if (!known.includes(match[1])) found.add(match[1]);
   }
   return [...found];
+};
+
+const textDecoder = new TextDecoder();
+
+/** Turns a captured transaction's request into an editable composer request. */
+export const manualRequestFromTransaction = (transaction: HttpTransaction): ManualRequest => {
+  const captured = transaction.request;
+  const port = captured.port ? `:${captured.port}` : "";
+  const url = `${captured.scheme}://${captured.host}${port}${captured.path}`;
+  const contentTypes = captured.headers
+    .filter((header) => header.name.toLowerCase() === "content-type")
+    .map((header) => header.value.split(";")[0].trim().toLowerCase());
+  const body: ManualBody = (() => {
+    if (captured.body.storage === "inline") {
+      const text = textDecoder.decode(new Uint8Array(captured.body.bytes));
+      return { kind: "raw", media_type: contentTypes[0] ?? null, text };
+    }
+    if (captured.body.storage === "truncated") {
+      const text = textDecoder.decode(new Uint8Array(captured.body.preview));
+      return { kind: "raw", media_type: contentTypes[0] ?? null, text };
+    }
+    // Offloaded artifacts and unavailable bodies have nothing editable.
+    return { kind: "none" };
+  })();
+  return {
+    method: captured.method,
+    url,
+    query: [],
+    headers: captured.headers.map((header) => ({ name: header.name, value: header.value })),
+    body,
+    auth: { kind: "none" },
+  };
 };

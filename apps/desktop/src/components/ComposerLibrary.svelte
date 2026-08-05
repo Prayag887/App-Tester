@@ -4,28 +4,40 @@
   // Owns its own data fetching; the composer only learns about loads.
   // Also hosts the environment switcher and the variables manager.
   import { onMount } from "svelte";
-  import { Check, ChevronRight, FolderOpen, Pencil, Plus, Settings2, Trash2 } from "lucide-svelte";
+  import { Check, ChevronRight, FolderOpen, History, Pencil, Plus, Settings2, Trash2 } from "lucide-svelte";
   import * as api from "../api";
   import EnvironmentsDialog from "./EnvironmentsDialog.svelte";
-  import type { CollectionSummary, EnvironmentSummary, ManualRequest, SavedRequest } from "../types";
+  import { timeLabel } from "../lib";
+  import type {
+    CollectionSummary,
+    EnvironmentSummary,
+    HistorySummary,
+    ManualRequest,
+    SavedRequestSummary,
+  } from "../types";
 
   let {
     loadedRequestId,
     activeEnvironmentId,
+    refreshToken,
     onLoadRequest,
     onActiveEnvironmentChange,
+    onVariablesSaved,
     onNotice,
   }: {
     loadedRequestId: string;
     activeEnvironmentId: string;
+    refreshToken: number;
     onLoadRequest: (request: ManualRequest, id: string, collectionId: string) => void;
     onActiveEnvironmentChange: (id: string) => void;
+    onVariablesSaved: () => void;
     onNotice: (message: string) => void;
   } = $props();
 
   let collections = $state<CollectionSummary[]>([]);
   let expanded = $state<Set<string>>(new Set());
-  let requestsByCollection = $state<Record<string, SavedRequest[]>>({});
+  let requestsByCollection = $state<Record<string, SavedRequestSummary[]>>({});
+  let history = $state<HistorySummary[]>([]);
   let creating = $state(false);
   let newName = $state("");
   let renaming = $state("");
@@ -35,6 +47,11 @@
 
   let environments = $state<EnvironmentSummary[]>([]);
   let envDialogOpen = $state(false);
+
+  $effect(() => {
+    // Bumped by the composer after every send so the list stays fresh.
+    if (refreshToken > 0) void loadHistory();
+  });
 
   async function refreshEnvironments() {
     try {
@@ -144,13 +161,57 @@
     }
   }
 
-  function load(request: SavedRequest) {
-    onLoadRequest(request.request, request.id, request.collection_id);
+  async function loadHistory() {
+    try {
+      history = await api.listHistory();
+    } catch (error) {
+      onNotice(`Could not load history: ${String(error)}`);
+    }
+  }
+
+  async function openHistoryEntry(entry: HistorySummary) {
+    try {
+      const request = await api.getHistoryRequest(entry.id);
+      onLoadRequest(request, "", "");
+      onNotice("Loaded from history — review, then send.");
+    } catch (error) {
+      onNotice(`Could not load the request: ${String(error)}`);
+    }
+  }
+
+  async function removeHistoryEntry(id: string) {
+    try {
+      await api.deleteHistory(id);
+      await loadHistory();
+    } catch (error) {
+      onNotice(`Could not delete history entry: ${String(error)}`);
+    }
+  }
+
+  async function clearAllHistory() {
+    try {
+      await api.clearHistory();
+      history = [];
+    } catch (error) {
+      onNotice(`Could not clear history: ${String(error)}`);
+    }
+  }
+
+  function load(request: SavedRequestSummary) {
+    void (async () => {
+      try {
+        const full = await api.getRequest(request.id);
+        onLoadRequest(full.request, full.id, full.collection_id);
+      } catch (error) {
+        onNotice(`Could not load the request: ${String(error)}`);
+      }
+    })();
   }
 
   onMount(() => {
     void refresh();
     void refreshEnvironments();
+    void loadHistory();
   });
 </script>
 
@@ -248,7 +309,7 @@
                 class="library-request"
                 onclick={() => load(request)}
               >
-                <span class="method-tag">{request.request.method}</span>
+                <span class="method-tag">{request.method}</span>
                 <span class="library-request-name" title={request.name}>{request.name}</span>
                 <span
                   class="icon-button library-remove"
@@ -269,13 +330,50 @@
       </div>
     {/each}
   </div>
+
+  <div class="library-heading">
+    <b>History</b>
+    {#if history.length}
+      <button
+        class="icon-button"
+        title="Clear history"
+        aria-label="Clear history"
+        onclick={() => void clearAllHistory()}
+      ><Trash2 size={13} /></button>
+    {/if}
+  </div>
+  <div class="library-list">
+    {#each history as entry}
+      <div class="history-row">
+        <button class="library-request" onclick={() => void openHistoryEntry(entry)}>
+          <span class="method-tag">{entry.method}</span>
+          <span class="library-request-name" title={entry.url}>{entry.url}</span>
+          <small class="history-time">{timeLabel(entry.sent_at)}</small>
+        </button>
+        <button
+          class="icon-button library-remove"
+          aria-label="Delete history entry"
+          onclick={() => void removeHistoryEntry(entry.id)}
+        ><Trash2 size={11} /></button>
+      </div>
+    {/each}
+    {#if !history.length}
+      <div class="library-empty">
+        <History size={13} />
+        Sent requests appear here for one-click re-sending.
+      </div>
+    {/if}
+  </div>
 </aside>
 
 {#if envDialogOpen}
   <EnvironmentsDialog
     open={envDialogOpen}
     onClose={() => (envDialogOpen = false)}
-    onSaved={() => void refreshEnvironments()}
+    onSaved={() => {
+      void refreshEnvironments();
+      onVariablesSaved();
+    }}
     onNotice={onNotice}
   />
 {/if}

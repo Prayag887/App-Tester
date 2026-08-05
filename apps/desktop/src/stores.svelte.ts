@@ -28,6 +28,9 @@ import type {
 export const ui = $state({
   screen: "traffic" as Screen,
   tab: "Overview" as Tab,
+  // A request handed to the composer from another screen (e.g. "Send in
+  // Composer" on a captured transaction); consumed on composer mount.
+  composerDraft: null as ManualRequest | null,
   proxy: "stopped" as ProxyStatus,
   devices: [] as AndroidDevice[],
   device: "",

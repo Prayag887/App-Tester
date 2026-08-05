@@ -74,6 +74,8 @@
   let activeEnvironmentId = $state("");
   let variables = $state<Variable[]>([]);
   let pickerOpen = $state(false);
+  // Bumped after every send so the library's history list stays fresh.
+  let historyRefresh = $state(0);
 
   let busy = $state(false);
   let response = $state<SendResult | null>(null);
@@ -83,6 +85,14 @@
   let urlInput: HTMLInputElement | undefined;
 
   onMount(() => {
+    // A request handed over from another screen ("Send in Composer").
+    if (ui.composerDraft) {
+      fillRequest(ui.composerDraft);
+      ui.composerDraft = null;
+      loadedRequestId = "";
+      loadedCollectionId = "";
+      ui.notice = "Opened in the composer — review, then send.";
+    }
     urlInput?.focus();
     void loadVariables();
   });
@@ -215,6 +225,7 @@
       );
       responseTab = "body";
       pretty = true;
+      historyRefresh += 1;
     } catch (cause) {
       response = null;
       error = String(cause);
@@ -434,8 +445,10 @@
   <ComposerLibrary
     loadedRequestId={loadedRequestId}
     activeEnvironmentId={activeEnvironmentId}
+    refreshToken={historyRefresh}
     onLoadRequest={loadSaved}
     onActiveEnvironmentChange={(id) => void changeEnvironment(id)}
+    onVariablesSaved={() => void loadVariables()}
     onNotice={(message) => (ui.notice = message)}
   />
   <div class="composer-request">
@@ -453,13 +466,20 @@
         class="url-input"
         bind:this={urlInput}
         value={url}
-        placeholder="https://api.example.com/v1/items — or paste a curl command"
+        placeholder={"https://api.example.com/v1/items — paste a curl command to import it"}
+        aria-label="Request URL"
         oninput={(event) => (url = (event.target as HTMLInputElement).value)}
         onpaste={(event) => {
           const text = event.clipboardData?.getData("text") ?? "";
           if (text.trimStart().startsWith("curl")) {
             event.preventDefault();
             void applyCurl(text);
+          }
+        }}
+        onkeydown={(event) => {
+          if (event.key === "Enter" && !(event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            void send();
           }
         }}
       />

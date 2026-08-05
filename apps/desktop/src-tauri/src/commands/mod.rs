@@ -6,5 +6,6 @@ pub mod companion;
 pub mod composer;
 pub mod devices;
 pub mod environments;
+pub mod history;
 pub mod session;
 pub mod traffic;

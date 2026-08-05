@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CollectionSummary, ComparisonRules, CompanionApp, CompanionConnection, CompanionInstall, EnvironmentSummary, HttpTransaction, ManualRequest, ProxyConfiguration, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary, SavedRequest, SendOptions, SendResult, UsbCompanionConnection, Variable, VariableRecord } from "./types";
+import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CollectionSummary, ComparisonRules, CompanionApp, CompanionConnection, CompanionInstall, EnvironmentSummary, HistorySummary, HttpTransaction, ManualRequest, ProxyConfiguration, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary, SavedRequest, SavedRequestSummary, SendOptions, SendResult, UsbCompanionConnection, Variable, VariableRecord } from "./types";
 const native = () => "__TAURI_INTERNALS__" in window;
 export const discoverDevices = async (): Promise<AndroidDevice[]> => native() ? invoke("discover_devices") : [];
 export const listInstalledApps = async (serial: string): Promise<AndroidApp[]> => invoke("list_installed_apps", { serial });
@@ -86,10 +86,18 @@ export const saveRequest = async (
   request: ManualRequest,
 ): Promise<SavedRequest> =>
   invoke("save_request", { id, collectionId, name, request });
-export const listRequests = async (collectionId: string): Promise<SavedRequest[]> =>
+export const listRequests = async (collectionId: string): Promise<SavedRequestSummary[]> =>
   invoke("list_requests", { collectionId });
+export const getRequest = async (id: string): Promise<SavedRequest> =>
+  invoke("get_request", { id });
 export const deleteRequest = async (id: string): Promise<void> =>
   invoke("delete_request", { id });
+export const listHistory = async (): Promise<HistorySummary[]> => invoke("list_history");
+export const getHistoryRequest = async (id: string): Promise<ManualRequest> =>
+  invoke("get_history_request", { id });
+export const deleteHistory = async (id: string): Promise<void> =>
+  invoke("delete_history", { id });
+export const clearHistory = async (): Promise<void> => invoke("clear_history");
 export const createEnvironment = async (name: string): Promise<EnvironmentSummary> =>
   invoke("create_environment", { name });
 export const renameEnvironment = async (id: string, name: string): Promise<void> =>

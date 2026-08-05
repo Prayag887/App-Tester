@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS environments (id TEXT PRIMARY KEY, project_id TEXT NO
 CREATE TABLE IF NOT EXISTS variables (id TEXT PRIMARY KEY, environment_id TEXT, name TEXT NOT NULL, value TEXT NOT NULL DEFAULT '', is_secret INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS variables_environment ON variables(environment_id);
 CREATE TABLE IF NOT EXISTS composer_environments (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS history (id TEXT PRIMARY KEY, method TEXT NOT NULL, url TEXT NOT NULL, request_json TEXT NOT NULL, status INTEGER, sent_at TEXT NOT NULL, UNIQUE(method, url, request_json));
+CREATE INDEX IF NOT EXISTS history_sent_at ON history(sent_at);
 "#;
 
 pub fn apply(connection: &Connection) -> Result<()> {

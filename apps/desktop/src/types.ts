@@ -102,6 +102,13 @@ export interface SavedRequest {
   id: string; collection_id: string; name: string; request: ManualRequest;
   created_at: string; updated_at: string;
 }
+export interface SavedRequestSummary {
+  id: string; collection_id: string; name: string; method: string; url: string;
+  created_at: string; updated_at: string;
+}
+export interface HistorySummary {
+  id: string; method: string; url: string; status: number | null; sent_at: string;
+}
 // ---- Environments & variables ----
 export interface Variable { name: string; value: string; is_secret: boolean }
 export interface EnvironmentSummary {

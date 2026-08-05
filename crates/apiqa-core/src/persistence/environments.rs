@@ -30,8 +30,12 @@ pub struct VariableRecord {
     pub updated_at: String,
 }
 
+/// RFC3339 (the same format transactions use over the wire), so timestamps
+/// are directly parseable by the frontend (`new Date`).
 fn now() -> String {
-    OffsetDateTime::now_utc().to_string()
+    OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| OffsetDateTime::now_utc().to_string())
 }
 
 impl Database {

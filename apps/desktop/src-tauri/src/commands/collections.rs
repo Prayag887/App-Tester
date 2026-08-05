@@ -2,7 +2,7 @@
 
 use androidqa_core::{
     composer::model::ManualRequest,
-    persistence::collections::{CollectionSummary, SavedRequest},
+    persistence::collections::{CollectionSummary, SavedRequest, SavedRequestSummary},
 };
 use uuid::Uuid;
 
@@ -82,14 +82,28 @@ pub async fn save_request(
         .map_err(|error| error.to_string())
 }
 
+/// Lightweight rows for the sidebar; the full payload is loaded on demand
+/// via `get_request` when a saved request is opened.
 #[tauri::command]
 pub async fn list_requests(
     state: tauri::State<'_, InspectorState>,
     collection_id: String,
-) -> Result<Vec<SavedRequest>, String> {
+) -> Result<Vec<SavedRequestSummary>, String> {
     state
         .database
         .list_requests_async(parse_id(collection_id)?)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn get_request(
+    state: tauri::State<'_, InspectorState>,
+    id: String,
+) -> Result<SavedRequest, String> {
+    state
+        .database
+        .get_request_async(parse_id(id)?)
         .await
         .map_err(|error| error.to_string())
 }

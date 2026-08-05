@@ -33,8 +33,25 @@ pub struct SavedRequest {
     pub updated_at: String,
 }
 
+/// Lightweight list row — the sidebar needs method/url/name, never the
+/// full payload. The full request is fetched on demand via `get_request`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedRequestSummary {
+    pub id: Uuid,
+    pub collection_id: Uuid,
+    pub name: String,
+    pub method: String,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// RFC3339 (the same format transactions use over the wire), so timestamps
+/// are directly parseable by the frontend (`new Date`).
 fn now() -> String {
-    OffsetDateTime::now_utc().to_string()
+    OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| OffsetDateTime::now_utc().to_string())
 }
 
 impl Database {
@@ -178,33 +195,62 @@ impl Database {
         })
     }
 
-    pub fn list_requests(&self, collection_id: Uuid) -> Result<Vec<SavedRequest>, StoreError> {
+    /// Lightweight rows for the sidebar; the payload stays in the database
+    /// until a request is actually opened.
+    pub fn list_requests(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<Vec<SavedRequestSummary>, StoreError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, name, payload_json, created_at, updated_at
+            "SELECT id, name, method, url, created_at, updated_at
              FROM requests WHERE collection_id = ?1
              ORDER BY position, created_at",
         )?;
         let rows = statement.query_map(params![collection_id.to_string()], |row| {
-            let payload: String = row.get(2)?;
-            let request = serde_json::from_str(&payload).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    2,
-                    rusqlite::types::Type::Text,
-                    Box::new(error),
-                )
-            })?;
-            Ok(SavedRequest {
+            Ok(SavedRequestSummary {
                 id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_default(),
                 collection_id,
                 name: row.get(1)?,
-                request,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+                method: row.get(2)?,
+                url: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
+    }
+
+    /// The full request, loaded only when a saved request is opened.
+    pub fn get_request(&self, id: Uuid) -> Result<SavedRequest, StoreError> {
+        let row = self
+            .connection()?
+            .query_row(
+                "SELECT id, collection_id, name, payload_json, created_at, updated_at
+                 FROM requests WHERE id = ?1",
+                params![id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or(StoreError::MissingRequest(id))?;
+        Ok(SavedRequest {
+            id,
+            collection_id: Uuid::parse_str(&row.1).unwrap_or_default(),
+            name: row.2,
+            request: serde_json::from_str(&row.3)?,
+            created_at: row.4,
+            updated_at: row.5,
+        })
     }
 
     pub fn delete_request(&self, id: Uuid) -> Result<(), StoreError> {
@@ -273,9 +319,17 @@ impl Database {
     pub async fn list_requests_async(
         self: &std::sync::Arc<Self>,
         collection_id: Uuid,
-    ) -> Result<Vec<SavedRequest>, StoreError> {
+    ) -> Result<Vec<SavedRequestSummary>, StoreError> {
         let database = self.clone();
         tokio::task::spawn_blocking(move || database.list_requests(collection_id)).await?
+    }
+
+    pub async fn get_request_async(
+        self: &std::sync::Arc<Self>,
+        id: Uuid,
+    ) -> Result<SavedRequest, StoreError> {
+        let database = self.clone();
+        tokio::task::spawn_blocking(move || database.get_request(id)).await?
     }
 
     pub async fn delete_request_async(
@@ -339,16 +393,21 @@ mod tests {
 
         let listed = database.list_requests(collection.id).unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].request.method, "POST");
+        assert_eq!(listed[0].method, "POST");
+        assert_eq!(listed[0].url, "https://api.test/item");
+
+        // The full payload is loaded on demand, untouched by the summary.
+        let loaded = database.get_request(saved.id).unwrap();
+        assert_eq!(loaded.request.method, "POST");
         assert_eq!(
-            listed[0].request.body,
+            loaded.request.body,
             ManualBody::Raw {
                 media_type: Some("application/json".into()),
                 text: "{\"name\":\"item\"}".into()
             }
         );
         assert_eq!(
-            listed[0].request.auth,
+            loaded.request.auth,
             AuthSpec::Bearer {
                 token: "tok".into()
             }

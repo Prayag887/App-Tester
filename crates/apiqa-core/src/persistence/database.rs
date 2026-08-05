@@ -21,6 +21,10 @@ pub enum StoreError {
     Task(#[from] tokio::task::JoinError),
     #[error("baseline transaction {0} does not exist")]
     BaselineTransactionMissing(Uuid),
+    #[error("saved request {0} does not exist")]
+    MissingRequest(Uuid),
+    #[error("history entry {0} does not exist")]
+    MissingHistory(Uuid),
     #[error("replay failed: {0}")]
     Replay(String),
 }

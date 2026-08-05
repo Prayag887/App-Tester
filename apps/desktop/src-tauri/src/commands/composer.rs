@@ -4,7 +4,7 @@ use androidqa_core::composer::{
     curl::{CurlImport, parse_curl as parse_curl_core},
     model::{ManualRequest, SendOptions, SendResult},
     send_manual,
-    variables::Variable,
+    variables::{Variable, resolve_request},
 };
 
 use crate::state::InspectorState;
@@ -35,14 +35,20 @@ pub async fn send_request(
     variables: Option<Vec<Variable>>,
 ) -> Result<SendResult, String> {
     let session_id = state.session.id_or_new();
-    send_manual(
+    let variables = variables.as_deref().unwrap_or(&[]);
+    // Resolve once up front so history records exactly what went on the
+    // wire; the engine's own resolution is then a no-op.
+    let resolved = resolve_request(&request, variables);
+    let outcome = send_manual(
         state.database.clone(),
         state.proxy.events(),
         session_id,
-        request,
+        resolved.clone(),
         options.unwrap_or_default(),
-        variables.as_deref().unwrap_or(&[]),
+        variables,
     )
-    .await
-    .map_err(|error| error.to_string())
+    .await;
+    let status = outcome.as_ref().map(|result| result.status).ok();
+    let _ = state.database.record_history_async(&resolved, status).await;
+    outcome.map_err(|error| error.to_string())
 }

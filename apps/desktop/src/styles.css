@@ -3722,3 +3722,25 @@ pre {
   text-decoration: underline;
   padding: 2px 6px;
 }
+
+/* ---- Composer: history ---- */
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.history-row .library-request {
+  gap: 6px;
+}
+.history-row .library-remove {
+  opacity: 0;
+}
+.history-row:hover .library-remove {
+  opacity: 1;
+}
+.history-time {
+  flex: none;
+  color: #66728a;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}

@@ -6,6 +6,7 @@ import {
   durationMs,
   elapsedLabel,
   endpointId,
+  manualRequestFromTransaction,
   methodTone,
   prettyJson,
   timeLabel,
@@ -345,6 +346,72 @@ describe("methodTone", () => {
     expect(methodTone("PATCH")).toBe("post");
     expect(methodTone("DELETE")).toBe("delete");
     expect(methodTone("BREW")).toBe("get");
+  });
+});
+
+describe("manualRequestFromTransaction", () => {
+  const transaction = (body: BodyStorage): HttpTransaction =>
+    ({
+      id: "t1",
+      session_id: "s1",
+      state: "completed",
+      started_at: "",
+      request: {
+        method: "POST",
+        scheme: "https",
+        host: "api.test",
+        path: "/v1/items?page=2",
+        query: [{ name: "page", value: "2" }],
+        headers: [
+          { name: "Content-Type", value: "application/json; charset=utf-8" },
+          { name: "X-Tenant", value: "acme" },
+        ],
+        body,
+        http_version: "HTTP/1.1",
+      },
+      response: {
+        status: 200,
+        headers: [],
+        body: { storage: "empty" },
+        decoded_size: 0,
+        encoded_size: 0,
+        http_version: "HTTP/1.1",
+      },
+      endpoint: "api.test",
+      method: "POST",
+    }) as HttpTransaction;
+
+  it("converts an inline JSON request into an editable composer request", () => {
+    const request = manualRequestFromTransaction(
+      transaction({
+        storage: "inline",
+        bytes: Array.from(new TextEncoder().encode("{\"a\":1}")),
+      }),
+    );
+    expect(request.method).toBe("POST");
+    expect(request.url).toBe("https://api.test/v1/items?page=2");
+    expect(request.query).toEqual([]); // the URL already carries the query
+    expect(request.headers).toEqual([
+      { name: "Content-Type", value: "application/json; charset=utf-8" },
+      { name: "X-Tenant", value: "acme" },
+    ]);
+    expect(request.body).toEqual({
+      kind: "raw",
+      media_type: "application/json",
+      text: "{\"a\":1}",
+    });
+    expect(request.auth).toEqual({ kind: "none" });
+  });
+
+  it("leaves offloaded and empty bodies as none", () => {
+    expect(
+      manualRequestFromTransaction(
+        transaction({ storage: "artifact", artifact_id: "a1", preview: [], original_size: 1024 }),
+      ).body,
+    ).toEqual({ kind: "none" });
+    expect(manualRequestFromTransaction(transaction({ storage: "empty" })).body).toEqual({
+      kind: "none",
+    });
   });
 });
 

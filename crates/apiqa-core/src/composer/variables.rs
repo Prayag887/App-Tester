@@ -4,6 +4,8 @@
 //! (URL, query, headers, body, auth) so the stored transaction shows exactly
 //! what went on the wire.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::model::{AuthSpec, ManualBody, ManualRequest, MultipartField};
@@ -20,6 +22,14 @@ pub struct Variable {
 /// pass, so variable values can never chain-expand into each other. Unknown
 /// names are left untouched for the composer to flag.
 pub fn resolve(text: &str, variables: &[Variable]) -> String {
+    let by_name: HashMap<&str, &str> = variables
+        .iter()
+        .map(|variable| (variable.name.as_str(), variable.value.as_str()))
+        .collect();
+    resolve_with(text, &by_name)
+}
+
+fn resolve_with(text: &str, by_name: &HashMap<&str, &str>) -> String {
     let mut output = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find("{{") {
@@ -27,8 +37,8 @@ pub fn resolve(text: &str, variables: &[Variable]) -> String {
         let after = &rest[start + 2..];
         if let Some(end) = after.find("}}") {
             let name = &after[..end];
-            if let Some(variable) = variables.iter().find(|variable| variable.name == name) {
-                output.push_str(&variable.value);
+            if let Some(value) = by_name.get(name) {
+                output.push_str(value);
             } else {
                 output.push_str(&format!("{{{{{name}}}}}"));
             }
@@ -43,40 +53,46 @@ pub fn resolve(text: &str, variables: &[Variable]) -> String {
 }
 
 /// A resolved copy of the request; the original stays untouched so the
-/// composer keeps showing the `{{name}}` placeholders.
+/// composer keeps showing the `{{name}}` placeholders. The lookup table is
+/// built once per request instead of per field.
 pub fn resolve_request(request: &ManualRequest, variables: &[Variable]) -> ManualRequest {
+    let by_name: HashMap<&str, &str> = variables
+        .iter()
+        .map(|variable| (variable.name.as_str(), variable.value.as_str()))
+        .collect();
+    let resolve = |text: &str| resolve_with(text, &by_name);
     let mut resolved = request.clone();
-    resolved.url = resolve(&request.url, variables);
+    resolved.url = resolve(&request.url);
     for entry in &mut resolved.query {
-        entry.name = resolve(&entry.name, variables);
-        entry.value = resolve(&entry.value, variables);
+        entry.name = resolve(&entry.name);
+        entry.value = resolve(&entry.value);
     }
     for entry in &mut resolved.headers {
-        entry.name = resolve(&entry.name, variables);
-        entry.value = resolve(&entry.value, variables);
+        entry.name = resolve(&entry.name);
+        entry.value = resolve(&entry.value);
     }
     resolved.body = match &request.body {
         ManualBody::None => ManualBody::None,
         ManualBody::Form { fields } => ManualBody::Form {
             fields: fields
                 .iter()
-                .map(|(name, value)| (resolve(name, variables), resolve(value, variables)))
+                .map(|(name, value)| (resolve(name), resolve(value)))
                 .collect(),
         },
         ManualBody::Multipart { fields } => ManualBody::Multipart {
             fields: fields
                 .iter()
                 .map(|field| MultipartField {
-                    name: resolve(&field.name, variables),
-                    value: field.value.as_ref().map(|value| resolve(value, variables)),
-                    file: field.file.as_ref().map(|file| resolve(file, variables)),
+                    name: resolve(&field.name),
+                    value: field.value.as_deref().map(resolve),
+                    file: field.file.as_deref().map(resolve),
                     media_type: field.media_type.clone(),
                 })
                 .collect(),
         },
         ManualBody::Raw { media_type, text } => ManualBody::Raw {
             media_type: media_type.clone(),
-            text: resolve(text, variables),
+            text: resolve(text),
         },
         ManualBody::Binary { bytes } => ManualBody::Binary {
             bytes: bytes.clone(),
@@ -85,19 +101,19 @@ pub fn resolve_request(request: &ManualRequest, variables: &[Variable]) -> Manua
     resolved.auth = match &request.auth {
         AuthSpec::None => AuthSpec::None,
         AuthSpec::Bearer { token } => AuthSpec::Bearer {
-            token: resolve(token, variables),
+            token: resolve(token),
         },
         AuthSpec::Basic { username, password } => AuthSpec::Basic {
-            username: resolve(username, variables),
-            password: resolve(password, variables),
+            username: resolve(username),
+            password: resolve(password),
         },
         AuthSpec::ApiKey {
             key,
             value,
             in_query,
         } => AuthSpec::ApiKey {
-            key: resolve(key, variables),
-            value: resolve(value, variables),
+            key: resolve(key),
+            value: resolve(value),
             in_query: *in_query,
         },
     };
