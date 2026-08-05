@@ -189,16 +189,14 @@ pub fn list_third_party_apps(
     let mut apps = package_names
         .into_iter()
         .filter_map(|package_name| {
-            package_details(&package_dump, &package_name).map(|details| (package_name, details))
-        })
-        .filter_map(|(package_name, details)| {
-            package_is_debuggable(details).then(|| {
+            package_details(&package_dump, &package_name).map(|details| {
+                let debuggable = package_is_debuggable(details);
                 let (version_name, version_code) = parse_package_version(details);
                 AndroidApp {
                     package_name,
                     version_name,
                     version_code,
-                    debuggable: true,
+                    debuggable,
                 }
             })
         })
@@ -381,6 +379,84 @@ pub fn classify_connection(serial: &str) -> ConnectionType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scripted runner so list_installed_apps can be tested without adb.
+    struct FakeRunner {
+        responses: std::collections::HashMap<String, String>,
+    }
+
+    impl AdbRunner for FakeRunner {
+        fn run(&self, args: &[&str]) -> Result<String, DeviceError> {
+            let key = args.join(" ");
+            self.responses
+                .get(&key)
+                .cloned()
+                .ok_or(DeviceError::AdbNotFound)
+        }
+
+        fn push(&self, _serial: &str, _local: &Path, _remote: &str) -> Result<String, DeviceError> {
+            Ok(String::new())
+        }
+    }
+
+    #[test]
+    fn lists_both_debug_and_release_apps_with_flags() {
+        let runner = FakeRunner {
+            responses: [
+                (
+                    "-s serial shell pm list packages -3".to_owned(),
+                    "package:com.example.debug\npackage:com.example.release\n".to_owned(),
+                ),
+                (
+                    "-s serial shell dumpsys package".to_owned(),
+                    "  Package [com.example.debug] (111):\n\
+                     \x20   versionCode=1 minSdk=24\n\
+                     \x20   versionName=1.0\n\
+                     \x20   flags=[ HAS_CODE DEBUGGABLE ]\n\
+                       Package [com.example.release] (222):\n\
+                     \x20   versionCode=2 minSdk=24\n\
+                     \x20   versionName=2.0\n\
+                     \x20   flags=[ HAS_CODE ]\n"
+                        .to_owned(),
+                ),
+            ]
+            .into(),
+        };
+
+        let apps = list_third_party_apps(&runner, "serial").unwrap();
+        assert_eq!(apps.len(), 2);
+        let debug = apps
+            .iter()
+            .find(|app| app.package_name == "com.example.debug")
+            .unwrap();
+        let release = apps
+            .iter()
+            .find(|app| app.package_name == "com.example.release")
+            .unwrap();
+        assert!(debug.debuggable);
+        assert_eq!(debug.version_name.as_deref(), Some("1.0"));
+        assert!(
+            !release.debuggable,
+            "release builds must appear in the picker"
+        );
+        assert_eq!(release.version_name.as_deref(), Some("2.0"));
+    }
+
+    #[test]
+    fn falls_back_to_names_when_the_package_dump_is_missing() {
+        let runner = FakeRunner {
+            responses: [(
+                "-s serial shell pm list packages -3".to_owned(),
+                "package:com.example.release\n".to_owned(),
+            )]
+            .into(),
+        };
+
+        let apps = list_third_party_apps(&runner, "serial").unwrap();
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].package_name, "com.example.release");
+        assert!(!apps[0].debuggable);
+    }
 
     #[test]
     fn parses_and_classifies_adb_devices() {

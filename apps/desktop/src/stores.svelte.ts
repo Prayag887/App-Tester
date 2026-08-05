@@ -256,7 +256,7 @@ export async function refreshDevices() {
     if (nextDevice !== ui.device) {
       ui.device = nextDevice;
       // A USB device is normally selected automatically, so load its
-      // debuggable apps here rather than waiting for a second click.
+      // apps here rather than waiting for a second click.
       void loadApps();
       void resolveHost();
     }
@@ -284,7 +284,7 @@ export async function loadApps() {
       ui.packageName = "";
     }
   } catch (error) {
-    ui.notice = `Could not load debuggable packages: ${String(error)}`;
+    ui.notice = `Could not load packages: ${String(error)}`;
   }
 }
 
