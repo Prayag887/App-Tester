@@ -3744,3 +3744,117 @@ pre {
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- UI polish: motion & micro-interactions ---- */
+
+/* Button press feedback everywhere, subtle and consistent. */
+button,
+.select-wrapper,
+.library-toggle,
+.library-request {
+  transition:
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease,
+    transform 0.1s ease,
+    box-shadow 0.14s ease,
+    opacity 0.14s ease;
+}
+button:active:not(:disabled),
+.library-request:active {
+  transform: scale(0.97);
+}
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #9a7bdb;
+  outline-offset: 1px;
+}
+button:disabled {
+  cursor: default;
+}
+
+/* Dialogs arrive with a quick pop; the backdrop fades in. */
+.modal-backdrop {
+  animation: backdrop-in 0.16s ease;
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.save-dialog,
+.env-dialog,
+.qr-dialog,
+.var-picker-menu {
+  animation: dialog-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  transform-origin: center;
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* The response pane rises in when a new response lands. */
+.composer-response {
+  animation: rise-in 0.22s ease;
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Library rows: gentle slide on hover, removed rows fade out. */
+.library-request:hover {
+  transform: translateX(2px);
+}
+.library-collection,
+.history-row {
+  transition: opacity 0.18s ease;
+}
+.env-row {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.env-row.removed {
+  transform: translateX(-4px);
+}
+
+/* Success flash for the Send button after a 2xx response. */
+.composer-bar .primary.success {
+  background: #1f4d3a;
+  border-color: #2f7a58;
+}
+.composer-bar .primary.success svg {
+  color: #6fe0b4;
+}
+
+/* Spinner spins — it deserves a real spin. */
+.spinner {
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Hover lift for collection toggles. */
+.library-toggle:hover {
+  transform: translateX(1px);
+}

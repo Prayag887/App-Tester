@@ -68,6 +68,7 @@
   let saveName = $state("");
   let saveCollectionId = $state("");
   let saveCollections = $state<CollectionSummary[]>([]);
+  let saveNewName = $state("");
   let saveBusy = $state(false);
 
   // Environment variables: global + active environment, environment wins.
@@ -76,6 +77,8 @@
   let pickerOpen = $state(false);
   // Bumped after every send so the library's history list stays fresh.
   let historyRefresh = $state(0);
+  // Flashes green on the Send button after a successful send.
+  let sendFlash = $state(false);
 
   let busy = $state(false);
   let response = $state<SendResult | null>(null);
@@ -226,6 +229,9 @@
       responseTab = "body";
       pretty = true;
       historyRefresh += 1;
+      // Brief success flash on the Send button.
+      sendFlash = true;
+      window.setTimeout(() => (sendFlash = false), 600);
     } catch (cause) {
       response = null;
       error = String(cause);
@@ -363,7 +369,24 @@
       error = "Enter a name for the request.";
       return;
     }
-    if (!saveCollectionId) {
+    let collectionId = saveCollectionId;
+    if (collectionId === "__new__") {
+      const collectionName = saveNewName.trim();
+      if (!collectionName) {
+        error = "Enter a name for the new collection.";
+        return;
+      }
+      saveBusy = true;
+      try {
+        const created = await api.createCollection(collectionName);
+        collectionId = created.id;
+      } catch (cause) {
+        error = `Could not create the collection: ${String(cause)}`;
+        saveBusy = false;
+        return;
+      }
+    }
+    if (!collectionId) {
       error = "Choose a collection to save into.";
       return;
     }
@@ -371,7 +394,7 @@
     try {
       const saved = await api.saveRequest(
         loadedRequestId || null,
-        saveCollectionId,
+        collectionId,
         name,
         wireRequest(),
       );
@@ -519,7 +542,7 @@
           </div>
         {/if}
       </div>
-      <button class="primary" disabled={busy} onclick={() => void send()}>
+      <button class="primary" class:success={sendFlash} disabled={busy} onclick={() => void send()}>
         {#if busy}<span class="spinner" />{:else}<Send size={15} />{/if}
         Send
       </button>
@@ -797,7 +820,19 @@
           {#each saveCollections as collection}
             <option value={collection.id}>{collection.name}</option>
           {/each}
+          <option value="__new__">＋ New collection…</option>
         </select>
+        {#if saveCollectionId === "__new__"}
+          <input
+            value={saveNewName}
+            placeholder="Collection name"
+            oninput={(event) => (saveNewName = (event.target as HTMLInputElement).value)}
+            onkeydown={(event) => {
+              if (event.key === "Enter") void saveCurrent();
+              if (event.key === "Escape") saveCollectionId = saveCollections[0]?.id ?? "";
+            }}
+          />
+        {/if}
       </label>
       <div class="save-actions">
         <span class="save-hint">

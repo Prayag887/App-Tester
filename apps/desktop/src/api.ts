@@ -113,7 +113,13 @@ export const saveVariable = async (
   environmentId: string | null,
   variable: Variable,
 ): Promise<VariableRecord> =>
-  invoke("save_variable", { id, environmentId, ...variable });
+  invoke("save_variable", {
+    id,
+    environmentId,
+    name: variable.name,
+    value: variable.value,
+    isSecret: variable.is_secret, // Tauri binds command args in camelCase only
+  });
 export const deleteVariable = async (id: string): Promise<void> =>
   invoke("delete_variable", { id });
 export const prepareAndroidCertificateInstall = async (serial:string):Promise<AndroidCertificateInstall> =>
