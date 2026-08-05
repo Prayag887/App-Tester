@@ -93,3 +93,12 @@ export interface SendResult {
   elapsed_ms: number; total_bytes: number; body: BodyStorage;
   content_type?: string | null; headers: HeaderEntry[]; http_version: string;
 }
+// ---- Collections & saved requests ----
+export interface CollectionSummary {
+  id: string; name: string; description: string; color: string;
+  request_count: number; created_at: string; updated_at: string;
+}
+export interface SavedRequest {
+  id: string; collection_id: string; name: string; request: ManualRequest;
+  created_at: string; updated_at: string;
+}

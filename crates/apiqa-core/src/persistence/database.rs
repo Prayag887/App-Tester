@@ -45,7 +45,7 @@ impl Database {
             connection: Mutex::new(connection),
         })
     }
-    fn connection(&self) -> Result<std::sync::MutexGuard<'_, Connection>, StoreError> {
+    pub(crate) fn connection(&self) -> Result<std::sync::MutexGuard<'_, Connection>, StoreError> {
         self.connection.lock().map_err(|_| StoreError::Poisoned)
     }
     pub fn upsert_transaction(&self, transaction: &HttpTransaction) -> Result<(), StoreError> {

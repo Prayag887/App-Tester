@@ -5,12 +5,14 @@
   // Pasting a curl command (in the URL bar or the import panel) fills the
   // whole composer from the native parser.
   import { onMount } from "svelte";
-  import { Plus, Send, TerminalSquare, Trash2 } from "lucide-svelte";
+  import { Check, Plus, Save, Send, TerminalSquare, Trash2 } from "lucide-svelte";
   import * as api from "../api";
   import { byteSizeLabel, elapsedLabel, prettyJson } from "../lib";
   import { ui } from "../stores.svelte";
+  import ComposerLibrary from "./ComposerLibrary.svelte";
   import type {
     AuthSpec,
+    CollectionSummary,
     HeaderEntry,
     ManualBody,
     ManualRequest,
@@ -53,10 +55,19 @@
   let apiKeyValue = $state("");
   // Transport settings carried by an imported curl command (`-k`, `-m`, …).
   let optionsOverride = $state<SendOptions | null>(null);
+  // The saved request currently loaded in the composer (update on save).
+  let loadedRequestId = $state("");
+  let loadedCollectionId = $state("");
 
   let curlOpen = $state(false);
   let curlText = $state("");
   let curlTextarea: HTMLTextAreaElement | undefined;
+
+  let saveOpen = $state(false);
+  let saveName = $state("");
+  let saveCollectionId = $state("");
+  let saveCollections = $state<CollectionSummary[]>([]);
+  let saveBusy = $state(false);
 
   let busy = $state(false);
   let response = $state<SendResult | null>(null);
@@ -145,13 +156,76 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") return;
-    event.preventDefault();
-    if (event.target === curlTextarea) {
-      void applyCurl(curlText);
+    if (!(event.metaKey || event.ctrlKey)) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (event.target === curlTextarea) {
+        void applyCurl(curlText);
+        return;
+      }
+      void send();
       return;
     }
-    void send();
+    if (event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      void openSaveDialog();
+    }
+  }
+
+  /// Maps a parsed request onto every composer tab. Shared by curl imports
+  /// and saved-request loads so both paths behave identically.
+  function fillRequest(request: ManualRequest) {
+    method = request.method;
+    url = request.url;
+    params = request.query.length
+      ? request.query.map((entry) => ({ ...entry }))
+      : [{ name: "", value: "" }];
+    headers = request.headers.length
+      ? request.headers.map((entry) => ({ ...entry }))
+      : [{ name: "", value: "" }];
+    const body = request.body;
+    if (body.kind === "form") {
+      bodyKind = "form";
+      formFields = body.fields.map(([name, value]) => ({ name, value }));
+      multipartFields = [{ name: "", value: "" }];
+      rawText = "";
+    } else if (body.kind === "multipart") {
+      bodyKind = "multipart";
+      multipartFields = body.fields.map((field) => ({ ...field }));
+      formFields = [{ name: "", value: "" }];
+      rawText = "";
+    } else if (body.kind === "raw") {
+      bodyKind = "raw";
+      rawText = body.text;
+      rawMediaType = body.media_type ?? "text/plain";
+      formFields = [{ name: "", value: "" }];
+      multipartFields = [{ name: "", value: "" }];
+    } else {
+      bodyKind = "none";
+      formFields = [{ name: "", value: "" }];
+      multipartFields = [{ name: "", value: "" }];
+      rawText = "";
+    }
+    const auth = request.auth;
+    if (auth.kind === "bearer") {
+      authKind = "bearer";
+      bearerToken = auth.token;
+    } else if (auth.kind === "basic") {
+      authKind = "basic";
+      basicUsername = auth.username;
+      basicPassword = auth.password;
+    } else if (auth.kind === "api_key") {
+      authKind = "api_key";
+      apiKeyName = auth.key;
+      apiKeyValue = auth.value;
+    } else {
+      authKind = "none";
+      bearerToken = "";
+      basicUsername = "";
+      basicPassword = "";
+      apiKeyName = "";
+      apiKeyValue = "";
+    }
   }
 
   /// Fills the composer from a parsed curl command. Every field the parser
@@ -161,64 +235,88 @@
     if (!text.trim()) return;
     try {
       const imported = await api.parseCurl(text);
-      const request = imported.request;
-      method = request.method;
-      url = request.url;
-      params = request.query.length
-        ? request.query.map((entry) => ({ ...entry }))
-        : [{ name: "", value: "" }];
-      headers = request.headers.length
-        ? request.headers.map((entry) => ({ ...entry }))
-        : [{ name: "", value: "" }];
-      const body = request.body;
-      if (body.kind === "form") {
-        bodyKind = "form";
-        formFields = body.fields.map(([name, value]) => ({ name, value }));
-        multipartFields = [{ name: "", value: "" }];
-        rawText = "";
-      } else if (body.kind === "multipart") {
-        bodyKind = "multipart";
-        multipartFields = body.fields.map((field) => ({ ...field }));
-        formFields = [{ name: "", value: "" }];
-        rawText = "";
-      } else if (body.kind === "raw") {
-        bodyKind = "raw";
-        rawText = body.text;
-        rawMediaType = body.media_type ?? "text/plain";
-        formFields = [{ name: "", value: "" }];
-        multipartFields = [{ name: "", value: "" }];
-      } else {
-        bodyKind = "none";
-        formFields = [{ name: "", value: "" }];
-        multipartFields = [{ name: "", value: "" }];
-        rawText = "";
-      }
-      const auth = request.auth;
-      if (auth.kind === "bearer") {
-        authKind = "bearer";
-        bearerToken = auth.token;
-      } else if (auth.kind === "basic") {
-        authKind = "basic";
-        basicUsername = auth.username;
-        basicPassword = auth.password;
-      } else if (auth.kind === "api_key") {
-        authKind = "api_key";
-        apiKeyName = auth.key;
-        apiKeyValue = auth.value;
-      } else {
-        authKind = "none";
-        bearerToken = "";
-        basicUsername = "";
-        basicPassword = "";
-        apiKeyName = "";
-        apiKeyValue = "";
-      }
+      fillRequest(imported.request);
       optionsOverride = imported.options;
+      loadedRequestId = "";
+      loadedCollectionId = "";
       curlOpen = false;
       error = "";
       ui.notice = "Imported from curl — review, then send.";
     } catch (cause) {
       error = `Could not parse curl: ${String(cause)}`;
+    }
+  }
+
+  function loadSaved(request: ManualRequest, id: string, collectionId: string) {
+    fillRequest(request);
+    loadedRequestId = id;
+    loadedCollectionId = collectionId;
+    error = "";
+    ui.notice = "Loaded — review, then send.";
+  }
+
+  async function openSaveDialog() {
+    if (!url.trim()) {
+      error = "Enter a URL before saving.";
+      return;
+    }
+    try {
+      saveCollections = await api.listCollections();
+      saveName =
+        url
+          .split("?")[0]
+          .split("/")
+          .filter(Boolean)
+          .pop() ?? `${method} ${url}`;
+      saveCollectionId =
+        loadedCollectionId ||
+        saveCollections[0]?.id ||
+        "";
+      saveOpen = true;
+    } catch (cause) {
+      error = `Could not load collections: ${String(cause)}`;
+    }
+  }
+
+  async function saveCurrent() {
+    const name = saveName.trim();
+    if (!name) {
+      error = "Enter a name for the request.";
+      return;
+    }
+    if (!saveCollectionId) {
+      error = "Choose a collection to save into.";
+      return;
+    }
+    saveBusy = true;
+    try {
+      const saved = await api.saveRequest(
+        loadedRequestId || null,
+        saveCollectionId,
+        name,
+        wireRequest(),
+      );
+      loadedRequestId = saved.id;
+      loadedCollectionId = saved.collection_id;
+      saveOpen = false;
+      error = "";
+      ui.notice = `Saved "${saved.name}".`;
+    } catch (cause) {
+      error = `Could not save: ${String(cause)}`;
+    } finally {
+      saveBusy = false;
+    }
+  }
+
+  async function pickMultipartFile(index: number) {
+    try {
+      const path = await api.pickFile();
+      if (path) {
+        multipartFields[index].file = path;
+        multipartFields[index].value = undefined;
+      }
+    } catch (cause) {
+      error = `Could not pick a file: ${String(cause)}`;
     }
   }
 
@@ -265,6 +363,11 @@
 </section>
 
 <section class="composer">
+  <ComposerLibrary
+    loadedRequestId={loadedRequestId}
+    onLoadRequest={loadSaved}
+    onNotice={(message) => (ui.notice = message)}
+  />
   <div class="composer-request">
     <div class="composer-bar">
       <select
@@ -297,6 +400,12 @@
         aria-label="Import from curl"
         onclick={() => (curlOpen = !curlOpen)}
       ><TerminalSquare size={15} /></button>
+      <button
+        class="icon-button curl-toggle"
+        title="Save request (⌘S)"
+        aria-label="Save request"
+        onclick={() => void openSaveDialog()}
+      ><Save size={15} /></button>
       <button class="primary" disabled={busy} onclick={() => void send()}>
         {#if busy}<span class="spinner" />{:else}<Send size={15} />{/if}
         Send
@@ -375,19 +484,34 @@
                   {field.media_type ? `(${field.media_type})` : ""}
                 </span>
               {:else}
-                <input
-                  value={field.value ?? ""}
-                  placeholder="Value"
-                  oninput={(event) =>
-                    (multipartFields[index].value =
-                      (event.target as HTMLInputElement).value)}
-                />
+                <div class="multipart-value">
+                  <input
+                    value={field.value ?? ""}
+                    placeholder="Value"
+                    oninput={(event) =>
+                      (multipartFields[index].value =
+                        (event.target as HTMLInputElement).value)}
+                  />
+                  <button
+                    class="file-pick"
+                    title="Choose a file for this field"
+                    onclick={() => void pickMultipartFile(index)}
+                  >📎 File</button>
+                </div>
               {/if}
-              <button
-                class="icon-button"
-                aria-label="Remove field"
-                onclick={() => multipartFields.splice(index, 1)}
-              ><Trash2 size={13} /></button>
+              {#if field.file}
+                <button
+                  class="file-pick"
+                  title="Choose a different file"
+                  onclick={() => void pickMultipartFile(index)}
+                >Choose…</button>
+              {:else}
+                <button
+                  class="icon-button"
+                  aria-label="Remove field"
+                  onclick={() => multipartFields.splice(index, 1)}
+                ><Trash2 size={13} /></button>
+              {/if}
             </div>
           {/each}
           <button
@@ -518,3 +642,50 @@
     {/if}
   </div>
 </section>
+
+{#if saveOpen}
+  <div class="modal-backdrop" role="presentation" onclick={(event) => {
+    if (event.target === event.currentTarget) saveOpen = false;
+  }}>
+    <div class="save-dialog" role="dialog" aria-label="Save request">
+      <h2><Save size={16} /> Save request</h2>
+      <label>
+        <span>Name</span>
+        <input
+          value={saveName}
+          placeholder="e.g. Create item"
+          oninput={(event) => (saveName = (event.target as HTMLInputElement).value)}
+          onkeydown={(event) => {
+            if (event.key === "Enter") void saveCurrent();
+            if (event.key === "Escape") saveOpen = false;
+          }}
+        />
+      </label>
+      <label>
+        <span>Collection</span>
+        <select
+          value={saveCollectionId}
+          onchange={(event) =>
+            (saveCollectionId = (event.target as HTMLSelectElement).value)}
+        >
+          {#if !saveCollections.length}
+            <option value="" disabled>No collections yet</option>
+          {/if}
+          {#each saveCollections as collection}
+            <option value={collection.id}>{collection.name}</option>
+          {/each}
+        </select>
+      </label>
+      <div class="save-actions">
+        <span class="save-hint">
+          {loadedRequestId ? "Updates the loaded request." : "Saves as a new request."}
+        </span>
+        <button class="quiet" onclick={() => (saveOpen = false)}>Cancel</button>
+        <button class="primary" disabled={saveBusy} onclick={() => void saveCurrent()}>
+          {#if saveBusy}<span class="spinner" />{/if}
+          Save
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

@@ -14,6 +14,16 @@ pub fn parse_curl(input: String) -> Result<CurlImport, String> {
     parse_curl_core(&input).map_err(|error| error.to_string())
 }
 
+/// Opens a native file picker for multipart file fields; `None` when the
+/// user cancels.
+#[tauri::command]
+pub fn pick_file() -> Result<Option<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .set_title("Choose a file to upload")
+        .pick_file()
+        .map(|path| path.display().to_string()))
+}
+
 /// Sends a composed request, recording it as a transaction in the current
 /// session (same storage, same events as captured traffic).
 #[tauri::command]

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, ComparisonRules, CompanionApp, CompanionConnection, CompanionInstall, HttpTransaction, ManualRequest, ProxyConfiguration, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary, SendOptions, SendResult, UsbCompanionConnection } from "./types";
+import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CollectionSummary, ComparisonRules, CompanionApp, CompanionConnection, CompanionInstall, HttpTransaction, ManualRequest, ProxyConfiguration, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary, SavedRequest, SendOptions, SendResult, UsbCompanionConnection } from "./types";
 const native = () => "__TAURI_INTERNALS__" in window;
 export const discoverDevices = async (): Promise<AndroidDevice[]> => native() ? invoke("discover_devices") : [];
 export const listInstalledApps = async (serial: string): Promise<AndroidApp[]> => invoke("list_installed_apps", { serial });
@@ -69,6 +69,27 @@ export const sendRequest = async (request: ManualRequest, options: SendOptions):
 export interface CurlImport { request: ManualRequest; options: SendOptions }
 export const parseCurl = async (input: string): Promise<CurlImport> =>
   invoke("parse_curl", { input });
+export const pickFile = async (): Promise<string | null> =>
+  invoke("pick_file");
+export const createCollection = async (name: string): Promise<CollectionSummary> =>
+  invoke("create_collection", { name });
+export const renameCollection = async (id: string, name: string): Promise<void> =>
+  invoke("rename_collection", { id, name });
+export const deleteCollection = async (id: string): Promise<void> =>
+  invoke("delete_collection", { id });
+export const listCollections = async (): Promise<CollectionSummary[]> =>
+  invoke("list_collections");
+export const saveRequest = async (
+  id: string | null,
+  collectionId: string,
+  name: string,
+  request: ManualRequest,
+): Promise<SavedRequest> =>
+  invoke("save_request", { id, collectionId, name, request });
+export const listRequests = async (collectionId: string): Promise<SavedRequest[]> =>
+  invoke("list_requests", { collectionId });
+export const deleteRequest = async (id: string): Promise<void> =>
+  invoke("delete_request", { id });
 export const prepareAndroidCertificateInstall = async (serial:string):Promise<AndroidCertificateInstall> =>
   invoke("prepare_android_certificate_install", { serial });
 export const getAndroidCaStatus = async (serial:string, connectionType:string):Promise<AndroidCaStatus> =>
