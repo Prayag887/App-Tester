@@ -85,3 +85,14 @@ export const methodTone = (method: string): string => {
       return "get";
   }
 };
+
+/** Names of `{{placeholders}}` in a text that no known variable satisfies. */
+export const unresolvedVariables = (text: string, known: string[]): string[] => {
+  const found = new Set<string>();
+  const pattern = /\{\{([^{}]+)\}\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (!known.includes(match[1])) found.add(match[1]);
+  }
+  return [...found];
+};

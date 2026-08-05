@@ -2,18 +2,24 @@
   // The composer's collections sidebar: create/rename/delete collections,
   // expand them to list saved requests, and load one into the composer.
   // Owns its own data fetching; the composer only learns about loads.
+  // Also hosts the environment switcher and the variables manager.
   import { onMount } from "svelte";
-  import { Check, ChevronRight, FolderOpen, Pencil, Plus, Trash2 } from "lucide-svelte";
+  import { Check, ChevronRight, FolderOpen, Pencil, Plus, Settings2, Trash2 } from "lucide-svelte";
   import * as api from "../api";
-  import type { CollectionSummary, ManualRequest, SavedRequest } from "../types";
+  import EnvironmentsDialog from "./EnvironmentsDialog.svelte";
+  import type { CollectionSummary, EnvironmentSummary, ManualRequest, SavedRequest } from "../types";
 
   let {
     loadedRequestId,
+    activeEnvironmentId,
     onLoadRequest,
+    onActiveEnvironmentChange,
     onNotice,
   }: {
     loadedRequestId: string;
+    activeEnvironmentId: string;
     onLoadRequest: (request: ManualRequest, id: string, collectionId: string) => void;
+    onActiveEnvironmentChange: (id: string) => void;
     onNotice: (message: string) => void;
   } = $props();
 
@@ -26,6 +32,22 @@
   let renameValue = $state("");
   let confirmingDelete = $state("");
   let busy = $state(false);
+
+  let environments = $state<EnvironmentSummary[]>([]);
+  let envDialogOpen = $state(false);
+
+  async function refreshEnvironments() {
+    try {
+      environments = await api.listEnvironments();
+    } catch (error) {
+      onNotice(`Could not load environments: ${String(error)}`);
+    }
+  }
+
+  function switchEnvironment(id: string) {
+    onActiveEnvironmentChange(id);
+    onNotice(id ? "Environment switched." : "No environment selected.");
+  }
 
   async function refresh() {
     try {
@@ -126,10 +148,36 @@
     onLoadRequest(request.request, request.id, request.collection_id);
   }
 
-  onMount(() => void refresh());
+  onMount(() => {
+    void refresh();
+    void refreshEnvironments();
+  });
 </script>
 
 <aside class="composer-library">
+  <div class="library-heading">
+    <b>Environment</b>
+    <button
+      class="icon-button"
+      title="Manage environments & variables"
+      aria-label="Manage environments"
+      onclick={() => (envDialogOpen = true)}
+    ><Settings2 size={13} /></button>
+  </div>
+  <div class="library-environment">
+    <select
+      value={activeEnvironmentId}
+      aria-label="Active environment"
+      onchange={(event) =>
+        switchEnvironment((event.target as HTMLSelectElement).value)}
+    >
+      <option value="">No environment</option>
+      {#each environments as environment}
+        <option value={environment.id}>{environment.name}</option>
+      {/each}
+    </select>
+  </div>
+
   <div class="library-heading">
     <b>Collections</b>
     <button
@@ -222,3 +270,12 @@
     {/each}
   </div>
 </aside>
+
+{#if envDialogOpen}
+  <EnvironmentsDialog
+    open={envDialogOpen}
+    onClose={() => (envDialogOpen = false)}
+    onSaved={() => void refreshEnvironments()}
+    onNotice={onNotice}
+  />
+{/if}

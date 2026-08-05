@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL 
 CREATE TABLE IF NOT EXISTS collections (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, collection_id TEXT NOT NULL, name TEXT NOT NULL, method TEXT NOT NULL, url TEXT NOT NULL, payload_json TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS requests_collection_position ON requests(collection_id, position);
+CREATE TABLE IF NOT EXISTS environments (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS variables (id TEXT PRIMARY KEY, environment_id TEXT, name TEXT NOT NULL, value TEXT NOT NULL DEFAULT '', is_secret INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS variables_environment ON variables(environment_id);
+CREATE TABLE IF NOT EXISTS composer_environments (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 "#;
 
 pub fn apply(connection: &Connection) -> Result<()> {

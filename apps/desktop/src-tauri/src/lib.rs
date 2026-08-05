@@ -26,7 +26,8 @@ use androidqa_core::{
 use tauri::Manager;
 
 use commands::{
-    certificate, collections, companion, composer, devices, session as session_commands, traffic,
+    certificate, collections, companion, composer, devices, environments,
+    session as session_commands, traffic,
 };
 pub use state::{InspectorState, Session};
 
@@ -115,7 +116,14 @@ pub fn run() {
             collections::list_collections,
             collections::save_request,
             collections::list_requests,
-            collections::delete_request
+            collections::delete_request,
+            environments::create_environment,
+            environments::rename_environment,
+            environments::delete_environment,
+            environments::list_environments,
+            environments::list_variables,
+            environments::save_variable,
+            environments::delete_variable
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|error| {

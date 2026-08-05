@@ -7,7 +7,7 @@
   import { onMount } from "svelte";
   import { Check, Plus, Save, Send, TerminalSquare, Trash2 } from "lucide-svelte";
   import * as api from "../api";
-  import { byteSizeLabel, elapsedLabel, prettyJson } from "../lib";
+  import { byteSizeLabel, elapsedLabel, prettyJson, unresolvedVariables } from "../lib";
   import { ui } from "../stores.svelte";
   import ComposerLibrary from "./ComposerLibrary.svelte";
   import type {
@@ -20,6 +20,7 @@
     QueryParameter,
     SendOptions,
     SendResult,
+    Variable,
   } from "../types";
 
   const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -69,6 +70,11 @@
   let saveCollections = $state<CollectionSummary[]>([]);
   let saveBusy = $state(false);
 
+  // Environment variables: global + active environment, environment wins.
+  let activeEnvironmentId = $state("");
+  let variables = $state<Variable[]>([]);
+  let pickerOpen = $state(false);
+
   let busy = $state(false);
   let response = $state<SendResult | null>(null);
   let error = $state("");
@@ -76,7 +82,68 @@
   let pretty = $state(true);
   let urlInput: HTMLInputElement | undefined;
 
-  onMount(() => urlInput?.focus());
+  onMount(() => {
+    urlInput?.focus();
+    void loadVariables();
+  });
+
+  async function loadVariables() {
+    try {
+      const [globalVariables, environmentVariables] = await Promise.all([
+        api.listVariables(null),
+        api.listVariables(activeEnvironmentId || null),
+      ]);
+      const byName = new Map<string, Variable>();
+      for (const variable of globalVariables) {
+        byName.set(variable.name, variable);
+      }
+      for (const variable of environmentVariables) {
+        byName.set(variable.name, variable); // environment wins
+      }
+      variables = [...byName.values()];
+    } catch (cause) {
+      error = `Could not load variables: ${String(cause)}`;
+    }
+  }
+
+  async function changeEnvironment(id: string) {
+    activeEnvironmentId = id;
+    await loadVariables();
+  }
+
+  /// Every `{{name}}` used anywhere in the request that no variable
+  /// satisfies, deduplicated — shown as a warning strip before sending.
+  const unresolved = $derived.by(() => {
+    const known = variables.map((variable) => variable.name);
+    const texts = [
+      url,
+      ...params.map((entry) => `${entry.name} ${entry.value}`),
+      ...headers.map((entry) => `${entry.name} ${entry.value}`),
+      rawText,
+      ...formFields.map((field) => `${field.name} ${field.value}`),
+      ...multipartFields.map((field) => `${field.name} ${field.value ?? ""} ${field.file ?? ""}`),
+      bearerToken,
+      `${basicUsername} ${basicPassword}`,
+      `${apiKeyName} ${apiKeyValue}`,
+    ];
+    return [...new Set(texts.flatMap((text) => unresolvedVariables(text, known)))];
+  });
+
+  function insertVariable(name: string) {
+    const element = document.activeElement;
+    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+      ui.notice = "Click a request field first, then pick a variable.";
+      return;
+    }
+    const start = element.selectionStart ?? element.value.length;
+    const end = element.selectionEnd ?? start;
+    const token = `{{${name}}}`;
+    element.value = element.value.slice(0, start) + token + element.value.slice(end);
+    const caret = start + token.length;
+    element.setSelectionRange(caret, caret);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    pickerOpen = false;
+  }
 
   const responseText = $derived.by(() => {
     const body = response?.body;
@@ -144,6 +211,7 @@
       response = await api.sendRequest(
         wireRequest(),
         optionsOverride ?? DEFAULT_OPTIONS,
+        variables,
       );
       responseTab = "body";
       pretty = true;
@@ -365,7 +433,9 @@
 <section class="composer">
   <ComposerLibrary
     loadedRequestId={loadedRequestId}
+    activeEnvironmentId={activeEnvironmentId}
     onLoadRequest={loadSaved}
+    onActiveEnvironmentChange={(id) => void changeEnvironment(id)}
     onNotice={(message) => (ui.notice = message)}
   />
   <div class="composer-request">
@@ -406,6 +476,29 @@
         aria-label="Save request"
         onclick={() => void openSaveDialog()}
       ><Save size={15} /></button>
+      <div class="picker var-picker">
+        <button
+          class="icon-button curl-toggle"
+          class:active={pickerOpen}
+          title="Insert a variable ({{name}})"
+          aria-label="Insert a variable"
+          onclick={() => (pickerOpen = !pickerOpen)}
+        >{"{{ }}"}</button>
+        {#if pickerOpen}
+          <div class="var-picker-menu">
+            {#if variables.length}
+              {#each variables as variable}
+                <button onclick={() => insertVariable(variable.name)}>
+                  <span>{`{{${variable.name}}}`}</span>
+                  {#if variable.is_secret}<small>secret</small>{/if}
+                </button>
+              {/each}
+            {:else}
+              <span class="var-picker-empty">No variables yet — manage them in the library.</span>
+            {/if}
+          </div>
+        {/if}
+      </div>
       <button class="primary" disabled={busy} onclick={() => void send()}>
         {#if busy}<span class="spinner" />{:else}<Send size={15} />{/if}
         Send
@@ -426,6 +519,16 @@
           <span>Paste or type a curl command — it fills the composer. ⌘↵ applies.</span>
           <button class="primary" onclick={() => void applyCurl(curlText)}>Apply</button>
         </div>
+      </div>
+    {/if}
+
+    {#if unresolved.length}
+      <div class="var-warning">
+        <span>
+          Unknown {#if unresolved.length === 1}variable{:else}variables{/if}:
+          {unresolved.map((name) => `{{${name}}}`).join(", ")}
+        </span>
+        <button class="quiet" onclick={() => (pickerOpen = true)}>Insert variable</button>
       </div>
     {/if}
 

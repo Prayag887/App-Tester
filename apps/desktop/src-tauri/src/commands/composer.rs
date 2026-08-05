@@ -4,6 +4,7 @@ use androidqa_core::composer::{
     curl::{CurlImport, parse_curl as parse_curl_core},
     model::{ManualRequest, SendOptions, SendResult},
     send_manual,
+    variables::Variable,
 };
 
 use crate::state::InspectorState;
@@ -31,6 +32,7 @@ pub async fn send_request(
     state: tauri::State<'_, InspectorState>,
     request: ManualRequest,
     options: Option<SendOptions>,
+    variables: Option<Vec<Variable>>,
 ) -> Result<SendResult, String> {
     let session_id = state.session.id_or_new();
     send_manual(
@@ -39,6 +41,7 @@ pub async fn send_request(
         session_id,
         request,
         options.unwrap_or_default(),
+        variables.as_deref().unwrap_or(&[]),
     )
     .await
     .map_err(|error| error.to_string())

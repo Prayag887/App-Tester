@@ -10,6 +10,7 @@ import {
   prettyJson,
   timeLabel,
   transactionState,
+  unresolvedVariables,
 } from "./lib";
 import type { BodyStorage, HttpTransaction } from "./types";
 
@@ -344,5 +345,22 @@ describe("methodTone", () => {
     expect(methodTone("PATCH")).toBe("post");
     expect(methodTone("DELETE")).toBe("delete");
     expect(methodTone("BREW")).toBe("get");
+  });
+});
+
+describe("unresolvedVariables", () => {
+  it("lists placeholders that no known variable satisfies, deduplicated", () => {
+    expect(
+      unresolvedVariables("https://{{host}}/v1?k={{token}}&r={{token}}", [
+        "token",
+      ]),
+    ).toEqual(["host"]);
+    expect(unresolvedVariables("no placeholders", ["host"])).toEqual([]);
+    expect(unresolvedVariables("{{host}}{{token}}", [])).toEqual([
+      "host",
+      "token",
+    ]);
+    expect(unresolvedVariables("broken {{host", ["host"])).toEqual([]);
+    expect(unresolvedVariables("", [])).toEqual([]);
   });
 });

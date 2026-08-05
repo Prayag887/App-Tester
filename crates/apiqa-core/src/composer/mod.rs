@@ -11,6 +11,7 @@ pub mod capture;
 pub mod curl;
 pub mod model;
 pub mod send;
+pub mod variables;
 
 pub use model::{AuthSpec, ManualBody, ManualRequest, MultipartField, SendOptions, SendResult};
 pub use send::send_manual;
