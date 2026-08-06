@@ -202,4 +202,28 @@ mod tests {
         ));
         assert!(imported[0].curl.is_none());
     }
+
+    #[test]
+    fn native_export_then_import_produces_identical_metadata() {
+        let original = transaction();
+        let exported = export_capture(std::slice::from_ref(&original), original.created_at);
+        let encoded = encode_capture(&exported).unwrap();
+        let imported = import_capture(
+            &encoded,
+            Uuid::new_v4(),
+            OffsetDateTime::now_utc(),
+        )
+        .unwrap();
+        assert_eq!(imported.len(), 1);
+        // Metadata fields survive the round-trip.
+        assert_eq!(imported[0].request.method, original.request.method);
+        assert_eq!(imported[0].request.host, original.request.host);
+        assert_eq!(imported[0].request.path, original.request.path);
+        assert_eq!(imported[0].state, original.state);
+        // Sensitive bodies and queries are replaced.
+        assert!(matches!(
+            imported[0].request.body,
+            BodyStorage::Unavailable { .. }
+        ));
+    }
 }

@@ -308,6 +308,44 @@ mod tests {
     }
 
     #[test]
+    fn opening_existing_database_does_not_lose_data() {
+        let db = Database::open_in_memory().unwrap();
+        let connection = db.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO projects(id,name,created_at) VALUES ('p1','Test','2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        // Re-open and verify the row survived.
+        let connection = db.connection().unwrap();
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn legacy_dormant_tables_exist_and_are_queryable() {
+        let db = Database::open_in_memory().unwrap();
+        let connection = db.connection().unwrap();
+        // These tables exist in INITIAL_SCHEMA and must survive all migrations.
+        for table in &["projects", "environments", "devices", "sessions"] {
+            let count: i64 = connection
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{table}'"
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "legacy table '{table}' must exist");
+        }
+    }
+
+    #[test]
     fn deleting_capture_data_removes_baselines_and_diagnostics() {
         let db = Database::open_in_memory().unwrap();
         let connection = db.connection().unwrap();

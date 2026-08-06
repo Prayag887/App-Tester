@@ -29,6 +29,7 @@ futures-util.workspace = true
 base64.workspace = true
 
 [dev-dependencies]
+walkdir = "2"
 
 [lints]
 workspace = true

@@ -235,4 +235,45 @@ mod tests {
         service.stop().await;
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[tokio::test]
+    async fn stop_on_a_stopped_proxy_is_safe() {
+        let root = std::env::temp_dir().join(format!("app-tester-proxy-{}", Uuid::new_v4()));
+        let service = ProxyService::new(
+            ProxyConfiguration {
+                bind_address: "0.0.0.0".into(),
+                port: 0,
+                ca_certificate_path: root.join("app-tester-ca.pem"),
+                ca_fingerprint_sha256: None,
+            },
+            Arc::new(Database::open_in_memory().unwrap()),
+            EventBroadcaster::default(),
+        );
+        // Stopping before starting should not panic.
+        service.stop().await;
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn repeated_start_stop_cycle_is_idempotent() {
+        let root = std::env::temp_dir().join(format!("app-tester-proxy-{}", Uuid::new_v4()));
+        let certificate_path = root.join("app-tester-ca.pem");
+        let service = ProxyService::new(
+            ProxyConfiguration {
+                bind_address: "0.0.0.0".into(),
+                port: 0,
+                ca_certificate_path: certificate_path.clone(),
+                ca_fingerprint_sha256: None,
+            },
+            Arc::new(Database::open_in_memory().unwrap()),
+            EventBroadcaster::default(),
+        );
+        // Start → stop → start → stop must not panic or leave stale state.
+        service.start(Uuid::new_v4()).await.unwrap();
+        service.stop().await;
+        service.start(Uuid::new_v4()).await.unwrap();
+        assert_ne!(service.configuration().port, 0);
+        service.stop().await;
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

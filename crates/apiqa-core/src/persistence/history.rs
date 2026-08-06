@@ -143,6 +143,7 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::composer::model::ManualBody;
 
     fn request(method: &str, url: &str) -> ManualRequest {
         ManualRequest {
@@ -205,5 +206,33 @@ mod tests {
             .unwrap();
         database.clear_history().unwrap();
         assert!(database.list_history(50).unwrap().is_empty());
+    }
+
+    #[test]
+    fn different_body_creates_separate_history_row() {
+        let database = Database::open_in_memory().unwrap();
+        // Same method + url, different body — must NOT dedupe.
+        let mut first = request("POST", "https://a.test/api");
+        first.body = ManualBody::Raw {
+            media_type: Some("application/json".into()),
+            text: "{\"a\":1}".into(),
+        };
+        let mut second = request("POST", "https://a.test/api");
+        second.body = ManualBody::Raw {
+            media_type: Some("application/json".into()),
+            text: "{\"a\":2}".into(),
+        };
+        database
+            .record_history(&first, Some(200))
+            .unwrap();
+        database
+            .record_history(&second, Some(200))
+            .unwrap();
+        let entries = database.list_history(50).unwrap();
+        assert_eq!(
+            entries.len(),
+            2,
+            "different bodies must produce separate history rows"
+        );
     }
 }
