@@ -364,14 +364,22 @@ fn verify_applied_checksums(conn: &Connection) -> Result<(), StoreError> {
         .map_err(StoreError::Sql)?;
 
     for row in rows {
-        let (version, stored_checksum) = row.map_err(StoreError::Sql)?;
+        let (version, stored_checksum) = row.map_err(|error| StoreError::Sql(error))?;
         let migration = migrations()
             .into_iter()
             .find(|m| m.version == version);
         match migration {
             Some(m) => {
                 let actual = checksum(m.sql);
-                if actual != stored_checksum {
+                if stored_checksum.is_empty() {
+                    // Legacy row from old schema_migrations — no checksum was
+                    // stored. Update it to the current checksum.
+                    conn.execute(
+                        "UPDATE schema_migrations SET checksum = ?1 WHERE version = ?2",
+                        rusqlite::params![actual, version],
+                    )
+                    .map_err(|error| StoreError::Sql(error))?;
+                } else if actual != stored_checksum {
                     return Err(StoreError::Sql(rusqlite::Error::InvalidParameterName(
                         format!(
                             "checksum mismatch for migration {} ({}): the migration file was \
