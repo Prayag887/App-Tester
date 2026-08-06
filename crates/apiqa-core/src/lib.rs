@@ -15,6 +15,7 @@ pub mod composer;
 pub mod correlation;
 pub mod diagnostics;
 pub mod events;
+pub mod infrastructure;
 pub mod issues;
 pub mod persistence;
 pub mod proxy;

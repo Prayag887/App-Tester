@@ -30,6 +30,7 @@ base64.workspace = true
 
 [dev-dependencies]
 walkdir = "2"
+tempfile = "3"
 
 [lints]
 workspace = true
