@@ -25,12 +25,17 @@ use androidqa_core::{
 };
 use tauri::Manager;
 
-use commands::{certificate, companion, devices, session as session_commands, traffic};
+use commands::{
+    certificate, collections, companion, composer, devices, environments, history,
+    session as session_commands, traffic,
+};
 pub use state::{InspectorState, Session};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
@@ -103,7 +108,29 @@ pub fn run() {
             traffic::approve_baseline,
             traffic::delete_baseline,
             traffic::get_comparison_rules,
-            traffic::save_comparison_rules
+            traffic::save_comparison_rules,
+            composer::parse_curl,
+            composer::pick_file,
+            composer::send_request,
+            collections::create_collection,
+            collections::rename_collection,
+            collections::delete_collection,
+            collections::list_collections,
+            collections::save_request,
+            collections::list_requests,
+            collections::get_request,
+            collections::delete_request,
+            environments::create_environment,
+            environments::rename_environment,
+            environments::delete_environment,
+            environments::list_environments,
+            environments::list_variables,
+            environments::save_variable,
+            environments::delete_variable,
+            history::list_history,
+            history::get_history_request,
+            history::delete_history,
+            history::clear_history
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|error| {

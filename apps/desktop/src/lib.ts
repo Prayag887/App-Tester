@@ -2,9 +2,9 @@
 //! every function is a deterministic mapping over plain values, which keeps
 //! them unit-testable in isolation.
 
-import type { BodyStorage, HttpTransaction } from "./types";
+import type { BodyStorage, HttpTransaction, ManualBody, ManualRequest } from "./types";
 
-export type Screen = "traffic" | "logs";
+export type Screen = "traffic" | "logs" | "composer";
 export type Tab =
   "Overview" | "Request" | "Response" | "Compare" | "cURL" | "Timeline";
 export type TransactionState = "Pending" | "Failed" | "Changed" | "Captured";
@@ -59,4 +59,72 @@ export const timeLabel = (iso: string): string =>
 export const copyToClipboard = (value: string, onDone: () => void): void => {
   void navigator.clipboard.writeText(value);
   onDone();
+};
+
+// ---- Composer presentation helpers ----
+
+export const elapsedLabel = (ms: number): string =>
+  ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+
+export const byteSizeLabel = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+/** Maps an HTTP method to the existing row-tone CSS class. */
+export const methodTone = (method: string): string => {
+  switch (method.toUpperCase()) {
+    case "POST":
+    case "PUT":
+    case "PATCH":
+      return "post";
+    case "DELETE":
+      return "delete";
+    default:
+      return "get";
+  }
+};
+
+/** Names of `{{placeholders}}` in a text that no known variable satisfies. */
+export const unresolvedVariables = (text: string, known: string[]): string[] => {
+  const found = new Set<string>();
+  const pattern = /\{\{([^{}]+)\}\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (!known.includes(match[1])) found.add(match[1]);
+  }
+  return [...found];
+};
+
+const textDecoder = new TextDecoder();
+
+/** Turns a captured transaction's request into an editable composer request. */
+export const manualRequestFromTransaction = (transaction: HttpTransaction): ManualRequest => {
+  const captured = transaction.request;
+  const port = captured.port ? `:${captured.port}` : "";
+  const url = `${captured.scheme}://${captured.host}${port}${captured.path}`;
+  const contentTypes = captured.headers
+    .filter((header) => header.name.toLowerCase() === "content-type")
+    .map((header) => header.value.split(";")[0].trim().toLowerCase());
+  const body: ManualBody = (() => {
+    if (captured.body.storage === "inline") {
+      const text = textDecoder.decode(new Uint8Array(captured.body.bytes));
+      return { kind: "raw", media_type: contentTypes[0] ?? null, text };
+    }
+    if (captured.body.storage === "truncated") {
+      const text = textDecoder.decode(new Uint8Array(captured.body.preview));
+      return { kind: "raw", media_type: contentTypes[0] ?? null, text };
+    }
+    // Offloaded artifacts and unavailable bodies have nothing editable.
+    return { kind: "none" };
+  })();
+  return {
+    method: captured.method,
+    url,
+    query: [],
+    headers: captured.headers.map((header) => ({ name: header.name, value: header.value })),
+    body,
+    auth: { kind: "none" },
+  };
 };

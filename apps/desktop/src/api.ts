@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, ComparisonRules, CompanionApp, CompanionConnection, CompanionInstall, HttpTransaction, ProxyConfiguration, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary, UsbCompanionConnection } from "./types";
+import type { AndroidApp, AndroidCaChange, AndroidCertificateInstall, AndroidCaStatus, AndroidDevice, CollectionSummary, ComparisonRules, CompanionApp, CompanionConnection, CompanionInstall, EnvironmentSummary, HistorySummary, HttpTransaction, ManualRequest, ProxyConfiguration, ProxyStatus, QrPairingChallenge, QrPairingResult, ReplaySummary, SavedRequest, SavedRequestSummary, SendOptions, SendResult, UsbCompanionConnection, Variable, VariableRecord } from "./types";
 const native = () => "__TAURI_INTERNALS__" in window;
 export const discoverDevices = async (): Promise<AndroidDevice[]> => native() ? invoke("discover_devices") : [];
 export const listInstalledApps = async (serial: string): Promise<AndroidApp[]> => invoke("list_installed_apps", { serial });
@@ -64,6 +64,64 @@ export const enableUsbWifi = async (serial:string, port=5555):Promise<QrPairingR
   invoke("enable_usb_wifi", { serial, port });
 export const captureScreen = async (serial:string):Promise<string> =>
   invoke("capture_screen", { serial });
+export const sendRequest = async (request: ManualRequest, options: SendOptions, variables: Variable[]): Promise<SendResult> =>
+  invoke("send_request", { request, options, variables });
+export interface CurlImport { request: ManualRequest; options: SendOptions }
+export const parseCurl = async (input: string): Promise<CurlImport> =>
+  invoke("parse_curl", { input });
+export const pickFile = async (): Promise<string | null> =>
+  invoke("pick_file");
+export const createCollection = async (name: string): Promise<CollectionSummary> =>
+  invoke("create_collection", { name });
+export const renameCollection = async (id: string, name: string): Promise<void> =>
+  invoke("rename_collection", { id, name });
+export const deleteCollection = async (id: string): Promise<void> =>
+  invoke("delete_collection", { id });
+export const listCollections = async (): Promise<CollectionSummary[]> =>
+  invoke("list_collections");
+export const saveRequest = async (
+  id: string | null,
+  collectionId: string,
+  name: string,
+  request: ManualRequest,
+): Promise<SavedRequest> =>
+  invoke("save_request", { id, collectionId, name, request });
+export const listRequests = async (collectionId: string): Promise<SavedRequestSummary[]> =>
+  invoke("list_requests", { collectionId });
+export const getRequest = async (id: string): Promise<SavedRequest> =>
+  invoke("get_request", { id });
+export const deleteRequest = async (id: string): Promise<void> =>
+  invoke("delete_request", { id });
+export const listHistory = async (): Promise<HistorySummary[]> => invoke("list_history");
+export const getHistoryRequest = async (id: string): Promise<ManualRequest> =>
+  invoke("get_history_request", { id });
+export const deleteHistory = async (id: string): Promise<void> =>
+  invoke("delete_history", { id });
+export const clearHistory = async (): Promise<void> => invoke("clear_history");
+export const createEnvironment = async (name: string): Promise<EnvironmentSummary> =>
+  invoke("create_environment", { name });
+export const renameEnvironment = async (id: string, name: string): Promise<void> =>
+  invoke("rename_environment", { id, name });
+export const deleteEnvironment = async (id: string): Promise<void> =>
+  invoke("delete_environment", { id });
+export const listEnvironments = async (): Promise<EnvironmentSummary[]> =>
+  invoke("list_environments");
+export const listVariables = async (environmentId: string | null): Promise<VariableRecord[]> =>
+  invoke("list_variables", { environmentId });
+export const saveVariable = async (
+  id: string | null,
+  environmentId: string | null,
+  variable: Variable,
+): Promise<VariableRecord> =>
+  invoke("save_variable", {
+    id,
+    environmentId,
+    name: variable.name,
+    value: variable.value,
+    isSecret: variable.is_secret, // Tauri binds command args in camelCase only
+  });
+export const deleteVariable = async (id: string): Promise<void> =>
+  invoke("delete_variable", { id });
 export const prepareAndroidCertificateInstall = async (serial:string):Promise<AndroidCertificateInstall> =>
   invoke("prepare_android_certificate_install", { serial });
 export const getAndroidCaStatus = async (serial:string, connectionType:string):Promise<AndroidCaStatus> =>

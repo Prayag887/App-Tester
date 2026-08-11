@@ -25,6 +25,15 @@ CREATE TABLE IF NOT EXISTS issue_occurrences (id TEXT PRIMARY KEY, issue_id TEXT
 CREATE TABLE IF NOT EXISTS redaction_rules (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, payload_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS comparison_rules (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, endpoint_id TEXT, payload_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE, blake3 TEXT NOT NULL, path TEXT NOT NULL, content_type TEXT NOT NULL, encoding TEXT, original_size INTEGER NOT NULL, stored_size INTEGER NOT NULL, redaction_status TEXT NOT NULL, created_at TEXT NOT NULL, retention_policy TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS collections (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, collection_id TEXT NOT NULL, name TEXT NOT NULL, method TEXT NOT NULL, url TEXT NOT NULL, payload_json TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS requests_collection_position ON requests(collection_id, position);
+CREATE TABLE IF NOT EXISTS environments (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS variables (id TEXT PRIMARY KEY, environment_id TEXT, name TEXT NOT NULL, value TEXT NOT NULL DEFAULT '', is_secret INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS variables_environment ON variables(environment_id);
+CREATE TABLE IF NOT EXISTS composer_environments (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS history (id TEXT PRIMARY KEY, method TEXT NOT NULL, url TEXT NOT NULL, request_json TEXT NOT NULL, status INTEGER, sent_at TEXT NOT NULL, UNIQUE(method, url, request_json));
+CREATE INDEX IF NOT EXISTS history_sent_at ON history(sent_at);
 "#;
 
 pub fn apply(connection: &Connection) -> Result<()> {

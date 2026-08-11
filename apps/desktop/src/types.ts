@@ -67,3 +67,53 @@ export interface LogIncident {
 }
 export interface ReplaySummary { attempted:number; completed:number; changed:number; skipped:number; failed:number }
 export interface ComparisonRules { ignored_json_pointers:string[]; volatile_keys:string[] }
+// ---- Composer (manual requests) ----
+export type ManualBody =
+  | { kind: "none" }
+  | { kind: "form"; fields: [string, string][] }
+  | { kind: "multipart"; fields: MultipartField[] }
+  | { kind: "raw"; media_type?: string | null; text: string }
+  | { kind: "binary"; bytes: number[] };
+export interface MultipartField { name: string; value?: string | null; file?: string | null; media_type?: string | null }
+export type AuthSpec =
+  | { kind: "none" }
+  | { kind: "bearer"; token: string }
+  | { kind: "basic"; username: string; password: string }
+  | { kind: "api_key"; key: string; value: string; in_query: boolean };
+export interface ManualRequest {
+  method: string; url: string; query: QueryParameter[]; headers: HeaderEntry[];
+  body: ManualBody; auth: AuthSpec;
+}
+export interface SendOptions {
+  timeout_ms: number; follow_redirects: boolean; max_redirects: number;
+  verify_tls: boolean; proxy_url: string | null;
+}
+export interface SendResult {
+  transaction_id: string; state: string; status: number; reason?: string | null;
+  elapsed_ms: number; total_bytes: number; body: BodyStorage;
+  content_type?: string | null; headers: HeaderEntry[]; http_version: string;
+}
+// ---- Collections & saved requests ----
+export interface CollectionSummary {
+  id: string; name: string; description: string; color: string;
+  request_count: number; created_at: string; updated_at: string;
+}
+export interface SavedRequest {
+  id: string; collection_id: string; name: string; request: ManualRequest;
+  created_at: string; updated_at: string;
+}
+export interface SavedRequestSummary {
+  id: string; collection_id: string; name: string; method: string; url: string;
+  created_at: string; updated_at: string;
+}
+export interface HistorySummary {
+  id: string; method: string; url: string; status: number | null; sent_at: string;
+}
+// ---- Environments & variables ----
+export interface Variable { name: string; value: string; is_secret: boolean }
+export interface EnvironmentSummary {
+  id: string; name: string; variable_count: number; created_at: string; updated_at: string;
+}
+export interface VariableRecord extends Variable {
+  id: string; environment_id: string | null; created_at: string; updated_at: string;
+}

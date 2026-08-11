@@ -4,7 +4,9 @@
   import Sidenav from "./components/Sidenav.svelte";
   import Topbar from "./components/Topbar.svelte";
   import NoticeBar from "./components/NoticeBar.svelte";
+  import UpdateBanner from "./components/UpdateBanner.svelte";
   import TrafficView from "./components/TrafficView.svelte";
+  import ComposerView from "./components/ComposerView.svelte";
   import LogsView from "./components/LogsView.svelte";
   import {
     closePickers,
@@ -15,6 +17,7 @@
     upsertIncident,
     upsertTransaction,
   } from "./stores.svelte";
+  import { checkForUpdates } from "./updates.svelte";
   const screen = $derived(ui.screen);
   import type { HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
@@ -23,6 +26,7 @@
   onMount(() => {
     void refreshProxyStatus();
     void refreshDevices();
+    const updateTimer = window.setTimeout(() => void checkForUpdates(), 2500);
     // Traffic and proxy state arrive as live push events from the native
     // bridge; no polling is needed for them. Only device discovery is
     // inherently poll-based. The poll backs off while the window is
@@ -47,6 +51,7 @@
     ];
     return () => {
       window.clearInterval(deviceTimer);
+      window.clearTimeout(updateTimer);
       window.removeEventListener("focus", onFocus);
       void Promise.all(unlisteners).then(items => items.forEach(stop => stop()));
     };
@@ -59,8 +64,11 @@
   <section class:logs-mode={screen === "logs"} class="svelte-main">
     <Topbar />
     <NoticeBar />
+    <UpdateBanner />
     {#if screen === "traffic"}
       <TrafficView />
+    {:else if screen === "composer"}
+      <ComposerView />
     {:else}
       <LogsView />
     {/if}

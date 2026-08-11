@@ -32,7 +32,7 @@ and installer checks.
 | --- | --- | --- |
 | Automated checks | Partial | The exact release commit passes Rust, desktop, and companion checks on CI. |
 | Installers | Partial | Signed, versioned installers are built and smoke-tested on supported macOS architectures, Windows, and Linux. |
-| Update and rollback | Missing | Releases document update behavior, installer provenance, rollback steps, and support windows. |
+| Update and rollback | Partial | Signed Windows NSIS and Linux AppImage updates are implemented through GitHub Releases. Demonstrate upgrade and failed-update recovery on both platforms, then document rollback steps and support windows. |
 | Release notes | Partial | Every release states user-visible changes, migration notes, known limitations, and security-impacting changes. |
 
 ## Current evidence

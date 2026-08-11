@@ -28,6 +28,9 @@ import type {
 export const ui = $state({
   screen: "traffic" as Screen,
   tab: "Overview" as Tab,
+  // A request handed to the composer from another screen (e.g. "Send in
+  // Composer" on a captured transaction); consumed on composer mount.
+  composerDraft: null as ManualRequest | null,
   proxy: "stopped" as ProxyStatus,
   devices: [] as AndroidDevice[],
   device: "",
@@ -253,7 +256,7 @@ export async function refreshDevices() {
     if (nextDevice !== ui.device) {
       ui.device = nextDevice;
       // A USB device is normally selected automatically, so load its
-      // debuggable apps here rather than waiting for a second click.
+      // apps here rather than waiting for a second click.
       void loadApps();
       void resolveHost();
     }
@@ -281,7 +284,7 @@ export async function loadApps() {
       ui.packageName = "";
     }
   } catch (error) {
-    ui.notice = `Could not load debuggable packages: ${String(error)}`;
+    ui.notice = `Could not load packages: ${String(error)}`;
   }
 }
 

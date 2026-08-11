@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   bodyText,
+  byteSizeLabel,
   curlCommand,
   durationMs,
+  elapsedLabel,
   endpointId,
+  manualRequestFromTransaction,
+  methodTone,
   prettyJson,
   timeLabel,
   transactionState,
+  unresolvedVariables,
 } from "./lib";
 import type { BodyStorage, HttpTransaction } from "./types";
 
@@ -309,5 +314,120 @@ describe("timeLabel robustness", () => {
   it("handles timestamps without a timezone offset", () => {
     const label = timeLabel("2026-07-24T10:30:45");
     expect(label).toMatch(/^\d{1,2}:\d{2}:\d{2} (AM|PM)$/);
+  });
+});
+
+describe("elapsedLabel", () => {
+  it("uses milliseconds below one second and seconds above", () => {
+    expect(elapsedLabel(0)).toBe("0 ms");
+    expect(elapsedLabel(999)).toBe("999 ms");
+    expect(elapsedLabel(1000)).toBe("1.0 s");
+    expect(elapsedLabel(2500)).toBe("2.5 s");
+  });
+});
+
+describe("byteSizeLabel", () => {
+  it("scales bytes to KB and MB with one decimal", () => {
+    expect(byteSizeLabel(0)).toBe("0 B");
+    expect(byteSizeLabel(1023)).toBe("1023 B");
+    expect(byteSizeLabel(1024)).toBe("1.0 KB");
+    expect(byteSizeLabel(1536)).toBe("1.5 KB");
+    expect(byteSizeLabel(1024 * 1024)).toBe("1.0 MB");
+    expect(byteSizeLabel(3.5 * 1024 * 1024)).toBe("3.5 MB");
+  });
+});
+
+describe("methodTone", () => {
+  it("maps methods to row-tone classes", () => {
+    expect(methodTone("GET")).toBe("get");
+    expect(methodTone("HEAD")).toBe("get");
+    expect(methodTone("post")).toBe("post");
+    expect(methodTone("PUT")).toBe("post");
+    expect(methodTone("PATCH")).toBe("post");
+    expect(methodTone("DELETE")).toBe("delete");
+    expect(methodTone("BREW")).toBe("get");
+  });
+});
+
+describe("manualRequestFromTransaction", () => {
+  const transaction = (body: BodyStorage): HttpTransaction =>
+    ({
+      id: "t1",
+      session_id: "s1",
+      state: "completed",
+      started_at: "",
+      request: {
+        method: "POST",
+        scheme: "https",
+        host: "api.test",
+        path: "/v1/items?page=2",
+        query: [{ name: "page", value: "2" }],
+        headers: [
+          { name: "Content-Type", value: "application/json; charset=utf-8" },
+          { name: "X-Tenant", value: "acme" },
+        ],
+        body,
+        http_version: "HTTP/1.1",
+      },
+      response: {
+        status: 200,
+        headers: [],
+        body: { storage: "empty" },
+        decoded_size: 0,
+        encoded_size: 0,
+        http_version: "HTTP/1.1",
+      },
+      endpoint: "api.test",
+      method: "POST",
+    }) as HttpTransaction;
+
+  it("converts an inline JSON request into an editable composer request", () => {
+    const request = manualRequestFromTransaction(
+      transaction({
+        storage: "inline",
+        bytes: Array.from(new TextEncoder().encode("{\"a\":1}")),
+      }),
+    );
+    expect(request.method).toBe("POST");
+    expect(request.url).toBe("https://api.test/v1/items?page=2");
+    expect(request.query).toEqual([]); // the URL already carries the query
+    expect(request.headers).toEqual([
+      { name: "Content-Type", value: "application/json; charset=utf-8" },
+      { name: "X-Tenant", value: "acme" },
+    ]);
+    expect(request.body).toEqual({
+      kind: "raw",
+      media_type: "application/json",
+      text: "{\"a\":1}",
+    });
+    expect(request.auth).toEqual({ kind: "none" });
+  });
+
+  it("leaves offloaded and empty bodies as none", () => {
+    expect(
+      manualRequestFromTransaction(
+        transaction({ storage: "artifact", artifact_id: "a1", preview: [], original_size: 1024 }),
+      ).body,
+    ).toEqual({ kind: "none" });
+    expect(manualRequestFromTransaction(transaction({ storage: "empty" })).body).toEqual({
+      kind: "none",
+    });
+  });
+});
+
+describe("unresolvedVariables", () => {
+  it("lists placeholders that no known variable satisfies, deduplicated", () => {
+    expect(
+      unresolvedVariables("https://{{host}}/v1?k={{token}}&r={{token}}", [
+        "token",
+      ]),
+    ).toEqual(["host"]);
+    expect(unresolvedVariables("no placeholders", ["host"])).toEqual([]);
+    expect(unresolvedVariables("{{host}}{{token}}", [])).toEqual([
+      "host",
+      "token",
+    ]);
+    expect(unresolvedVariables("broken {{host", ["host"])).toEqual([]);
+    expect(unresolvedVariables("", [])).toEqual([]);
   });
 });
