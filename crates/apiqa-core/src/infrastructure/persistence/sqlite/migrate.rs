@@ -79,13 +79,11 @@ impl MigrationEngine {
     /// the parent directory exists.
     pub fn prepare(path: &Path) -> Result<(), StoreError> {
         if let Some(parent) = path.parent()
-            && !parent.exists() {
-                std::fs::create_dir_all(parent).map_err(|_| {
-                    StoreError::Sql(rusqlite::Error::InvalidPath(
-                        path.to_path_buf(),
-                    ))
-                })?;
-            }
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent)
+                .map_err(|_| StoreError::Sql(rusqlite::Error::InvalidPath(path.to_path_buf())))?;
+        }
         Ok(())
     }
 
@@ -224,9 +222,7 @@ impl MigrationEngine {
             .unwrap_or_else(|_| OffsetDateTime::now_utc().to_string());
         for migration in migrations() {
             conn.execute_batch(migration.sql).map_err(|error| {
-                StoreError::Sql(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(error),
-                ))
+                StoreError::Sql(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
             })?;
             conn.execute(
                 "INSERT INTO schema_migrations(version, name, checksum, applied_at)
@@ -251,9 +247,7 @@ impl MigrationEngine {
             if migration.version <= current {
                 continue;
             }
-            let tx = conn
-                .unchecked_transaction()
-                .map_err(StoreError::Sql)?;
+            let tx = conn.unchecked_transaction().map_err(StoreError::Sql)?;
             let result = tx.execute_batch(migration.sql);
             match result {
                 Ok(()) => {
@@ -365,9 +359,7 @@ fn verify_applied_checksums(conn: &Connection) -> Result<(), StoreError> {
 
     for row in rows {
         let (version, stored_checksum) = row.map_err(StoreError::Sql)?;
-        let migration = migrations()
-            .into_iter()
-            .find(|m| m.version == version);
+        let migration = migrations().into_iter().find(|m| m.version == version);
         match migration {
             Some(m) => {
                 let actual = checksum(m.sql);
@@ -456,11 +448,8 @@ fn create_backup(conn: &Connection, db_path: &Path) -> Result<PathBuf, StoreErro
     // might miss pages still in the -wal file.
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
         .map_err(StoreError::Sql)?;
-    conn.execute(
-        &format!("VACUUM INTO '{}'", backup_path.display()),
-        [],
-    )
-    .map_err(StoreError::Sql)?;
+    conn.execute(&format!("VACUUM INTO '{}'", backup_path.display()), [])
+        .map_err(StoreError::Sql)?;
     Ok(backup_path)
 }
 
@@ -468,9 +457,8 @@ fn restore_backup(db_path: &Path, backup_path: &Path) -> Result<(), StoreError> 
     // The caller must ensure all database handles are closed before calling
     // this function. We copy the backup over the original and remove WAL/SHM
     // files.
-    std::fs::copy(backup_path, db_path).map_err(|_| {
-        StoreError::Sql(rusqlite::Error::InvalidPath(db_path.to_path_buf()))
-    })?;
+    std::fs::copy(backup_path, db_path)
+        .map_err(|_| StoreError::Sql(rusqlite::Error::InvalidPath(db_path.to_path_buf())))?;
     // Remove WAL and SHM files to clear any stale WAL state.
     let wal = db_path.with_extension("db-wal");
     let shm = db_path.with_extension("db-shm");
@@ -510,7 +498,12 @@ mod tests {
         assert_eq!(count, 4);
 
         // All expected tables exist.
-        for table in &["projects", "collections", "composer_environments", "history"] {
+        for table in &[
+            "projects",
+            "collections",
+            "composer_environments",
+            "history",
+        ] {
             let exists: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -638,7 +631,10 @@ mod tests {
         let has_table = has_schema_migrations_table(&conn);
         assert!(has_table, "fixture should have schema_migrations table");
         let version_before = current_version(&conn).unwrap();
-        assert_eq!(version_before, 0, "legacy fixture should have no migration rows");
+        assert_eq!(
+            version_before, 0,
+            "legacy fixture should have no migration rows"
+        );
 
         // Migrate.
         let version = MigrationEngine::migrate(&conn, &db_path).unwrap();
@@ -681,10 +677,8 @@ mod tests {
         drop(conn);
         let _ = std::fs::remove_file(&path);
         let conn = Connection::open(&path).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE sessions(id TEXT PRIMARY KEY);",
-        )
-        .unwrap();
+        conn.execute_batch("CREATE TABLE sessions(id TEXT PRIMARY KEY);")
+            .unwrap();
         let result = MigrationEngine::migrate(&conn, &path);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

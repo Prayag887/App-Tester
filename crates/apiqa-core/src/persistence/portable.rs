@@ -208,12 +208,7 @@ mod tests {
         let original = transaction();
         let exported = export_capture(std::slice::from_ref(&original), original.created_at);
         let encoded = encode_capture(&exported).unwrap();
-        let imported = import_capture(
-            &encoded,
-            Uuid::new_v4(),
-            OffsetDateTime::now_utc(),
-        )
-        .unwrap();
+        let imported = import_capture(&encoded, Uuid::new_v4(), OffsetDateTime::now_utc()).unwrap();
         assert_eq!(imported.len(), 1);
         // Metadata fields survive the round-trip.
         assert_eq!(imported[0].request.method, original.request.method);

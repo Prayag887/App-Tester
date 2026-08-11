@@ -9,8 +9,8 @@
 )]
 
 pub mod adb;
-pub mod application;
 pub mod android;
+pub mod application;
 pub mod comparison;
 pub mod composer;
 pub mod correlation;
@@ -66,10 +66,9 @@ mod tests {
                     .is_some_and(|extension| extension == "rs")
             })
         {
-            let contents =
-                std::fs::read_to_string(entry.path()).unwrap_or_else(|error| {
-                    panic!("could not read {}: {error}", entry.path().display())
-                });
+            let contents = std::fs::read_to_string(entry.path()).unwrap_or_else(|error| {
+                panic!("could not read {}: {error}", entry.path().display())
+            });
             for pattern in forbidden {
                 assert!(
                     !contents.contains(pattern),

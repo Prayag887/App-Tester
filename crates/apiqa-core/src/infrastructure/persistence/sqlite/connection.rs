@@ -44,9 +44,7 @@ impl Database {
         })
     }
 
-    pub(crate) fn connection(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, Connection>, StoreError> {
+    pub(crate) fn connection(&self) -> Result<std::sync::MutexGuard<'_, Connection>, StoreError> {
         self.connection.lock().map_err(|_| StoreError::Poisoned)
     }
 
@@ -67,8 +65,7 @@ impl Database {
         transaction: crate::traffic::HttpTransaction,
     ) -> Result<(), StoreError> {
         let database = Arc::clone(self);
-        tokio::task::spawn_blocking(move || database.upsert_transaction(&transaction))
-            .await?
+        tokio::task::spawn_blocking(move || database.upsert_transaction(&transaction)).await?
     }
 
     pub async fn pinned_baseline_async(
@@ -76,8 +73,7 @@ impl Database {
         endpoint_id: String,
     ) -> Result<Option<crate::traffic::HttpTransaction>, StoreError> {
         let database = Arc::clone(self);
-        tokio::task::spawn_blocking(move || database.pinned_baseline(&endpoint_id))
-            .await?
+        tokio::task::spawn_blocking(move || database.pinned_baseline(&endpoint_id)).await?
     }
 
     pub async fn comparison_rules_async(
@@ -85,8 +81,7 @@ impl Database {
         endpoint_id: String,
     ) -> Result<crate::comparison::ComparisonRules, StoreError> {
         let database = Arc::clone(self);
-        tokio::task::spawn_blocking(move || database.comparison_rules(&endpoint_id))
-            .await?
+        tokio::task::spawn_blocking(move || database.comparison_rules(&endpoint_id)).await?
     }
 
     pub async fn transactions_between_async(
@@ -95,8 +90,7 @@ impl Database {
         end: time::OffsetDateTime,
     ) -> Result<Vec<crate::traffic::HttpTransaction>, StoreError> {
         let database = Arc::clone(self);
-        tokio::task::spawn_blocking(move || database.transactions_between(start, end))
-            .await?
+        tokio::task::spawn_blocking(move || database.transactions_between(start, end)).await?
     }
 }
 
@@ -111,10 +105,7 @@ use uuid::Uuid;
 // is the persistence handle. They delegate through connection().
 
 impl Database {
-    pub fn upsert_transaction(
-        &self,
-        transaction: &HttpTransaction,
-    ) -> Result<(), StoreError> {
+    pub fn upsert_transaction(&self, transaction: &HttpTransaction) -> Result<(), StoreError> {
         self.connection()?.execute(
             "INSERT INTO transactions(id,session_id,state,payload_json,created_at,updated_at)
              VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET
@@ -148,10 +139,7 @@ impl Database {
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
 
-    pub fn get_transaction(
-        &self,
-        id: Uuid,
-    ) -> Result<Option<HttpTransaction>, StoreError> {
+    pub fn get_transaction(&self, id: Uuid) -> Result<Option<HttpTransaction>, StoreError> {
         let connection = self.connection()?;
         let mut statement =
             connection.prepare("SELECT payload_json FROM transactions WHERE id=?1")?;
@@ -169,8 +157,7 @@ impl Database {
         let mut statement = connection.prepare(
             "SELECT payload_json FROM transactions WHERE session_id=?1 ORDER BY created_at ASC",
         )?;
-        let rows =
-            statement.query_map([session_id.to_string()], |row| row.get::<_, String>(0))?;
+        let rows = statement.query_map([session_id.to_string()], |row| row.get::<_, String>(0))?;
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
 
@@ -183,10 +170,9 @@ impl Database {
         let mut statement = connection.prepare(
             "SELECT payload_json FROM transactions WHERE created_at >= ?1 AND created_at < ?2 ORDER BY created_at ASC",
         )?;
-        let rows = statement.query_map(
-            params![start.to_string(), end.to_string()],
-            |row| row.get::<_, String>(0),
-        )?;
+        let rows = statement.query_map(params![start.to_string(), end.to_string()], |row| {
+            row.get::<_, String>(0)
+        })?;
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
 
@@ -267,10 +253,7 @@ impl Database {
         Ok(Some(serde_json::from_str(&row.get::<_, String>(0)?)?))
     }
 
-    pub fn comparison_rules(
-        &self,
-        endpoint_id: &str,
-    ) -> Result<ComparisonRules, StoreError> {
+    pub fn comparison_rules(&self, endpoint_id: &str) -> Result<ComparisonRules, StoreError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
             "SELECT payload_json FROM comparison_rules

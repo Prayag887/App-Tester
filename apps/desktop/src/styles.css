@@ -1724,6 +1724,58 @@ pre {
   border: 0;
   background: transparent;
 }
+.update-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 22px;
+  border-bottom: 1px solid #4d4470;
+  background: linear-gradient(90deg, #292643, #242e4b);
+  color: #e9e5f5;
+  animation: slide-down 0.25s ease;
+}
+.update-banner > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-right: auto;
+}
+.update-banner > div > svg {
+  flex: none;
+  color: #b69aee;
+}
+.update-banner > div span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.update-banner small {
+  max-width: min(680px, 52vw);
+  overflow: hidden;
+  color: #aeb7cc;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.update-progress {
+  width: min(180px, 18vw);
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #111a2b;
+}
+.update-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #9d7fe2;
+  transition: width 0.18s ease;
+}
+.spin {
+  animation: spin 0.7s linear infinite;
+}
 .hero {
   flex: none;
   display: flex;

@@ -36,6 +36,9 @@ fail-fast: address the first failure and rerun the full gate.
 - [ ] Confirm version, changelog, release notes, artifact names, signatures,
   and rollback instructions.
 - [ ] Confirm required GitHub Actions are green for the exact merge commit.
+- [ ] Verify `latest.json` references the signed Windows NSIS and Linux
+  AppImage updater artifacts, then upgrade an installation of the preceding
+  version on both platforms.
 
 ## CI enforcement
 

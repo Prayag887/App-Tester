@@ -222,12 +222,8 @@ mod tests {
             media_type: Some("application/json".into()),
             text: "{\"a\":2}".into(),
         };
-        database
-            .record_history(&first, Some(200))
-            .unwrap();
-        database
-            .record_history(&second, Some(200))
-            .unwrap();
+        database.record_history(&first, Some(200)).unwrap();
+        database.record_history(&second, Some(200)).unwrap();
         let entries = database.list_history(50).unwrap();
         assert_eq!(
             entries.len(),
