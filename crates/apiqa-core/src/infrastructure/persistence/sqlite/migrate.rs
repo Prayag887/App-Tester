@@ -364,7 +364,7 @@ fn verify_applied_checksums(conn: &Connection) -> Result<(), StoreError> {
         .map_err(StoreError::Sql)?;
 
     for row in rows {
-        let (version, stored_checksum) = row.map_err(|error| StoreError::Sql(error))?;
+        let (version, stored_checksum) = row.map_err(StoreError::Sql)?;
         let migration = migrations()
             .into_iter()
             .find(|m| m.version == version);
@@ -378,7 +378,7 @@ fn verify_applied_checksums(conn: &Connection) -> Result<(), StoreError> {
                         "UPDATE schema_migrations SET checksum = ?1 WHERE version = ?2",
                         rusqlite::params![actual, version],
                     )
-                    .map_err(|error| StoreError::Sql(error))?;
+                    .map_err(StoreError::Sql)?;
                 } else if actual != stored_checksum {
                     return Err(StoreError::Sql(rusqlite::Error::InvalidParameterName(
                         format!(

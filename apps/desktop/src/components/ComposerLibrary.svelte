@@ -314,10 +314,18 @@
                 <span
                   class="icon-button library-remove"
                   role="button"
+                  tabindex="0"
                   aria-label="Delete request"
                   onclick={(event) => {
                     event.stopPropagation();
                     void removeRequest(collection.id, request);
+                  }}
+                  onkeydown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      void removeRequest(collection.id, request);
+                    }
                   }}
                 ><Trash2 size={11} /></span>
               </button>

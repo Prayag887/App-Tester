@@ -62,7 +62,7 @@
 
   let curlOpen = $state(false);
   let curlText = $state("");
-  let curlTextarea: HTMLTextAreaElement | undefined;
+  let curlTextarea = $state<HTMLTextAreaElement | undefined>();
 
   let saveOpen = $state(false);
   let saveName = $state("");
@@ -464,7 +464,7 @@
   <div class="hero-host"><small>SHORTCUT</small><b>⌘ ↵ to send</b></div>
 </section>
 
-<section class="composer">
+<section class:has-response={Boolean(response) || Boolean(error) || busy} class="composer">
   <ComposerLibrary
     loadedRequestId={loadedRequestId}
     activeEnvironmentId={activeEnvironmentId}
@@ -481,7 +481,7 @@
         aria-label="HTTP method"
         onchange={(event) => (method = (event.target as HTMLSelectElement).value)}
       >
-        {#each METHODS as entry}
+        {#each METHODS as entry (entry)}
           <option value={entry}>{entry}</option>
         {/each}
       </select>
@@ -530,7 +530,7 @@
         {#if pickerOpen}
           <div class="var-picker-menu">
             {#if variables.length}
-              {#each variables as variable}
+              {#each variables as variable (variable.name)}
                 <button onclick={() => insertVariable(variable.name)}>
                   <span>{`{{${variable.name}}}`}</span>
                   {#if variable.is_secret}<small>secret</small>{/if}
@@ -543,7 +543,7 @@
         {/if}
       </div>
       <button class="primary" class:success={sendFlash} disabled={busy} onclick={() => void send()}>
-        {#if busy}<span class="spinner" />{:else}<Send size={15} />{/if}
+        {#if busy}<span class="spinner"></span>{:else}<Send size={15} />{/if}
         Send
       </button>
     </div>
@@ -557,7 +557,7 @@
           value={curlText}
           placeholder={"curl 'https://api.example.com/v1' \\\n  -H 'Authorization: Bearer …'"}
           oninput={(event) => (curlText = (event.target as HTMLTextAreaElement).value)}
-        />
+        ></textarea>
         <div class="curl-actions">
           <span>Paste or type a curl command — it fills the composer. ⌘↵ applies.</span>
           <button class="primary" onclick={() => void applyCurl(curlText)}>Apply</button>
@@ -607,7 +607,7 @@
               onchange={(event) =>
                 (rawMediaType = (event.target as HTMLSelectElement).value)}
             >
-              {#each MEDIA_TYPES as mediaType}
+              {#each MEDIA_TYPES as mediaType (mediaType)}
                 <option value={mediaType}>{mediaType}</option>
               {/each}
             </select>
@@ -673,7 +673,7 @@
             value={rawText}
             placeholder={"{\"hello\": \"world\"}"}
             oninput={(event) => (rawText = (event.target as HTMLTextAreaElement).value)}
-          />
+          ></textarea>
         {/if}
       {:else if tab === "auth"}
         <div class="composer-row">
@@ -709,7 +709,7 @@
               placeholder="Password"
               oninput={(event) => (basicPassword = (event.target as HTMLInputElement).value)}
             />
-            <span />
+            <span></span>
           </div>
         {:else if authKind === "api_key"}
           <div class="kv-row">
@@ -723,16 +723,16 @@
               placeholder="Value"
               oninput={(event) => (apiKeyValue = (event.target as HTMLInputElement).value)}
             />
-            <span />
+            <span></span>
           </div>
         {/if}
       {/if}
     </div>
   </div>
 
-  <div class="composer-response">
+  <div class:response-empty={!response && !error && !busy} class="composer-response">
     {#if busy && !response}
-      <div class="empty"><span class="spinner" /><strong>Sending…</strong></div>
+      <div class="empty"><span class="spinner"></span><strong>Sending…</strong></div>
     {:else if error}
       <div class="composer-error">
         <b>Request failed</b>
@@ -747,7 +747,7 @@
         <span>{elapsedLabel(response.elapsed_ms)}</span>
         <span>{byteSizeLabel(response.total_bytes)}</span>
         <span>{response.http_version}</span>
-        <span class="meta-spacer" />
+        <span class="meta-spacer"></span>
         {#if responseText && (responseText !== responsePretty || response.body.storage === "truncated")}
           <button class:active={pretty} onclick={() => (pretty = !pretty)}>
             {pretty ? "Formatted" : "Raw"}
@@ -770,7 +770,7 @@
         <div class="panel">
           {#if response.headers.length}
             <div class="headers">
-              {#each response.headers as header}
+              {#each response.headers as header (`${header.name}:${header.value}`)}
                 <div><b>{header.name}</b><span>{header.value}</span></div>
               {/each}
             </div>
@@ -817,7 +817,7 @@
           {#if !saveCollections.length}
             <option value="" disabled>No collections yet</option>
           {/if}
-          {#each saveCollections as collection}
+          {#each saveCollections as collection (collection.id)}
             <option value={collection.id}>{collection.name}</option>
           {/each}
           <option value="__new__">＋ New collection…</option>
@@ -840,7 +840,7 @@
         </span>
         <button class="quiet" onclick={() => (saveOpen = false)}>Cancel</button>
         <button class="primary" disabled={saveBusy} onclick={() => void saveCurrent()}>
-          {#if saveBusy}<span class="spinner" />{/if}
+          {#if saveBusy}<span class="spinner"></span>{/if}
           Save
         </button>
       </div>

@@ -2934,7 +2934,11 @@ pre {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 250px minmax(440px, 1fr) minmax(380px, 1fr);
+  grid-template-columns: 224px minmax(560px, 1fr) 0;
+  background: #0d1525;
+}
+.composer.has-response {
+  grid-template-columns: 224px minmax(460px, 1.25fr) minmax(360px, 0.75fr);
 }
 .composer-request {
   min-width: 0;
@@ -3072,6 +3076,11 @@ pre {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  border-left: 1px solid #2d3850;
+  background: #101a2c;
+}
+.composer-response.response-empty {
+  display: none;
 }
 .composer-meta {
   flex: none;

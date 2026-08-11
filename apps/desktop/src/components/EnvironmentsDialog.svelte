@@ -289,7 +289,7 @@
       <span class="env-hint">Changes apply on save.</span>
       <button class="quiet" onclick={onClose}>Cancel</button>
       <button class="primary" disabled={busy} onclick={() => void save()}>
-        {#if busy}<span class="spinner" />{/if}
+        {#if busy}<span class="spinner"></span>{/if}
         Save changes
       </button>
     </div>
