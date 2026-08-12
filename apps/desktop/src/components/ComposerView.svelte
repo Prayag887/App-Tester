@@ -5,14 +5,12 @@
   // Pasting a curl command (in the URL bar or the import panel) fills the
   // whole composer from the native parser.
   import { onMount } from "svelte";
-  import { Check, Plus, Save, Send, TerminalSquare, Trash2 } from "lucide-svelte";
+  import { Plus, Send, TerminalSquare, Trash2 } from "lucide-svelte";
   import * as api from "../api";
-  import { byteSizeLabel, elapsedLabel, prettyJson, unresolvedVariables } from "../lib";
+  import { byteSizeLabel, elapsedLabel, prettyJson } from "../lib";
   import { ui } from "../stores.svelte";
-  import ComposerLibrary from "./ComposerLibrary.svelte";
   import type {
     AuthSpec,
-    CollectionSummary,
     HeaderEntry,
     ManualBody,
     ManualRequest,
@@ -20,7 +18,6 @@
     QueryParameter,
     SendOptions,
     SendResult,
-    Variable,
   } from "../types";
 
   const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -56,27 +53,10 @@
   let apiKeyValue = $state("");
   // Transport settings carried by an imported curl command (`-k`, `-m`, …).
   let optionsOverride = $state<SendOptions | null>(null);
-  // The saved request currently loaded in the composer (update on save).
-  let loadedRequestId = $state("");
-  let loadedCollectionId = $state("");
-
   let curlOpen = $state(false);
   let curlText = $state("");
   let curlTextarea = $state<HTMLTextAreaElement | undefined>();
 
-  let saveOpen = $state(false);
-  let saveName = $state("");
-  let saveCollectionId = $state("");
-  let saveCollections = $state<CollectionSummary[]>([]);
-  let saveNewName = $state("");
-  let saveBusy = $state(false);
-
-  // Environment variables: global + active environment, environment wins.
-  let activeEnvironmentId = $state("");
-  let variables = $state<Variable[]>([]);
-  let pickerOpen = $state(false);
-  // Bumped after every send so the library's history list stays fresh.
-  let historyRefresh = $state(0);
   // Flashes green on the Send button after a successful send.
   let sendFlash = $state(false);
 
@@ -92,71 +72,10 @@
     if (ui.composerDraft) {
       fillRequest(ui.composerDraft);
       ui.composerDraft = null;
-      loadedRequestId = "";
-      loadedCollectionId = "";
       ui.notice = "Opened in the composer — review, then send.";
     }
     urlInput?.focus();
-    void loadVariables();
   });
-
-  async function loadVariables() {
-    try {
-      const [globalVariables, environmentVariables] = await Promise.all([
-        api.listVariables(null),
-        api.listVariables(activeEnvironmentId || null),
-      ]);
-      const byName = new Map<string, Variable>();
-      for (const variable of globalVariables) {
-        byName.set(variable.name, variable);
-      }
-      for (const variable of environmentVariables) {
-        byName.set(variable.name, variable); // environment wins
-      }
-      variables = [...byName.values()];
-    } catch (cause) {
-      error = `Could not load variables: ${String(cause)}`;
-    }
-  }
-
-  async function changeEnvironment(id: string) {
-    activeEnvironmentId = id;
-    await loadVariables();
-  }
-
-  /// Every `{{name}}` used anywhere in the request that no variable
-  /// satisfies, deduplicated — shown as a warning strip before sending.
-  const unresolved = $derived.by(() => {
-    const known = variables.map((variable) => variable.name);
-    const texts = [
-      url,
-      ...params.map((entry) => `${entry.name} ${entry.value}`),
-      ...headers.map((entry) => `${entry.name} ${entry.value}`),
-      rawText,
-      ...formFields.map((field) => `${field.name} ${field.value}`),
-      ...multipartFields.map((field) => `${field.name} ${field.value ?? ""} ${field.file ?? ""}`),
-      bearerToken,
-      `${basicUsername} ${basicPassword}`,
-      `${apiKeyName} ${apiKeyValue}`,
-    ];
-    return [...new Set(texts.flatMap((text) => unresolvedVariables(text, known)))];
-  });
-
-  function insertVariable(name: string) {
-    const element = document.activeElement;
-    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
-      ui.notice = "Click a request field first, then pick a variable.";
-      return;
-    }
-    const start = element.selectionStart ?? element.value.length;
-    const end = element.selectionEnd ?? start;
-    const token = `{{${name}}}`;
-    element.value = element.value.slice(0, start) + token + element.value.slice(end);
-    const caret = start + token.length;
-    element.setSelectionRange(caret, caret);
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-    pickerOpen = false;
-  }
 
   const responseText = $derived.by(() => {
     const body = response?.body;
@@ -221,14 +140,9 @@
     busy = true;
     error = "";
     try {
-      response = await api.sendRequest(
-        wireRequest(),
-        optionsOverride ?? DEFAULT_OPTIONS,
-        variables,
-      );
+      response = await api.sendRequest(wireRequest(), optionsOverride ?? DEFAULT_OPTIONS);
       responseTab = "body";
       pretty = true;
-      historyRefresh += 1;
       // Brief success flash on the Send button.
       sendFlash = true;
       window.setTimeout(() => (sendFlash = false), 600);
@@ -251,14 +165,9 @@
       void send();
       return;
     }
-    if (event.key.toLowerCase() === "s") {
-      event.preventDefault();
-      void openSaveDialog();
-    }
   }
 
-  /// Maps a parsed request onto every composer tab. Shared by curl imports
-  /// and saved-request loads so both paths behave identically.
+  /// Maps a parsed request onto every composer tab.
   function fillRequest(request: ManualRequest) {
     method = request.method;
     url = request.url;
@@ -322,8 +231,6 @@
       const imported = await api.parseCurl(text);
       fillRequest(imported.request);
       optionsOverride = imported.options;
-      loadedRequestId = "";
-      loadedCollectionId = "";
       curlOpen = false;
       error = "";
       ui.notice = "Imported from curl — review, then send.";
@@ -332,83 +239,6 @@
     }
   }
 
-  function loadSaved(request: ManualRequest, id: string, collectionId: string) {
-    fillRequest(request);
-    loadedRequestId = id;
-    loadedCollectionId = collectionId;
-    error = "";
-    ui.notice = "Loaded — review, then send.";
-  }
-
-  async function openSaveDialog() {
-    if (!url.trim()) {
-      error = "Enter a URL before saving.";
-      return;
-    }
-    try {
-      saveCollections = await api.listCollections();
-      saveName =
-        url
-          .split("?")[0]
-          .split("/")
-          .filter(Boolean)
-          .pop() ?? `${method} ${url}`;
-      saveCollectionId =
-        loadedCollectionId ||
-        saveCollections[0]?.id ||
-        "";
-      saveOpen = true;
-    } catch (cause) {
-      error = `Could not load collections: ${String(cause)}`;
-    }
-  }
-
-  async function saveCurrent() {
-    const name = saveName.trim();
-    if (!name) {
-      error = "Enter a name for the request.";
-      return;
-    }
-    let collectionId = saveCollectionId;
-    if (collectionId === "__new__") {
-      const collectionName = saveNewName.trim();
-      if (!collectionName) {
-        error = "Enter a name for the new collection.";
-        return;
-      }
-      saveBusy = true;
-      try {
-        const created = await api.createCollection(collectionName);
-        collectionId = created.id;
-      } catch (cause) {
-        error = `Could not create the collection: ${String(cause)}`;
-        saveBusy = false;
-        return;
-      }
-    }
-    if (!collectionId) {
-      error = "Choose a collection to save into.";
-      return;
-    }
-    saveBusy = true;
-    try {
-      const saved = await api.saveRequest(
-        loadedRequestId || null,
-        collectionId,
-        name,
-        wireRequest(),
-      );
-      loadedRequestId = saved.id;
-      loadedCollectionId = saved.collection_id;
-      saveOpen = false;
-      error = "";
-      ui.notice = `Saved "${saved.name}".`;
-    } catch (cause) {
-      error = `Could not save: ${String(cause)}`;
-    } finally {
-      saveBusy = false;
-    }
-  }
 
   async function pickMultipartFile(index: number) {
     try {
@@ -465,15 +295,6 @@
 </section>
 
 <section class:has-response={Boolean(response) || Boolean(error) || busy} class="composer">
-  <ComposerLibrary
-    loadedRequestId={loadedRequestId}
-    activeEnvironmentId={activeEnvironmentId}
-    refreshToken={historyRefresh}
-    onLoadRequest={loadSaved}
-    onActiveEnvironmentChange={(id) => void changeEnvironment(id)}
-    onVariablesSaved={() => void loadVariables()}
-    onNotice={(message) => (ui.notice = message)}
-  />
   <div class="composer-request">
     <div class="composer-bar">
       <select
@@ -489,7 +310,7 @@
         class="url-input"
         bind:this={urlInput}
         value={url}
-        placeholder={"https://api.example.com/v1/items — paste a curl command to import it"}
+        placeholder="https://api.example.com/v1/items — paste a curl command to import it"
         aria-label="Request URL"
         oninput={(event) => (url = (event.target as HTMLInputElement).value)}
         onpaste={(event) => {
@@ -513,35 +334,6 @@
         aria-label="Import from curl"
         onclick={() => (curlOpen = !curlOpen)}
       ><TerminalSquare size={15} /></button>
-      <button
-        class="icon-button curl-toggle"
-        title="Save request (⌘S)"
-        aria-label="Save request"
-        onclick={() => void openSaveDialog()}
-      ><Save size={15} /></button>
-      <div class="picker var-picker">
-        <button
-          class="icon-button curl-toggle"
-          class:active={pickerOpen}
-          title="Insert a variable ({{name}})"
-          aria-label="Insert a variable"
-          onclick={() => (pickerOpen = !pickerOpen)}
-        >{"{{ }}"}</button>
-        {#if pickerOpen}
-          <div class="var-picker-menu">
-            {#if variables.length}
-              {#each variables as variable (variable.name)}
-                <button onclick={() => insertVariable(variable.name)}>
-                  <span>{`{{${variable.name}}}`}</span>
-                  {#if variable.is_secret}<small>secret</small>{/if}
-                </button>
-              {/each}
-            {:else}
-              <span class="var-picker-empty">No variables yet — manage them in the library.</span>
-            {/if}
-          </div>
-        {/if}
-      </div>
       <button class="primary" class:success={sendFlash} disabled={busy} onclick={() => void send()}>
         {#if busy}<span class="spinner"></span>{:else}<Send size={15} />{/if}
         Send
@@ -555,23 +347,13 @@
           class="curl-input"
           rows={4}
           value={curlText}
-          placeholder={"curl 'https://api.example.com/v1' \\\n  -H 'Authorization: Bearer …'"}
+          placeholder="curl 'https://api.example.com/v1' \\\n  -H 'Authorization: Bearer …'"
           oninput={(event) => (curlText = (event.target as HTMLTextAreaElement).value)}
         ></textarea>
         <div class="curl-actions">
           <span>Paste or type a curl command — it fills the composer. ⌘↵ applies.</span>
           <button class="primary" onclick={() => void applyCurl(curlText)}>Apply</button>
         </div>
-      </div>
-    {/if}
-
-    {#if unresolved.length}
-      <div class="var-warning">
-        <span>
-          Unknown {#if unresolved.length === 1}variable{:else}variables{/if}:
-          {unresolved.map((name) => `{{${name}}}`).join(", ")}
-        </span>
-        <button class="quiet" onclick={() => (pickerOpen = true)}>Insert variable</button>
       </div>
     {/if}
 
@@ -788,62 +570,3 @@
     {/if}
   </div>
 </section>
-
-{#if saveOpen}
-  <div class="modal-backdrop" role="presentation" onclick={(event) => {
-    if (event.target === event.currentTarget) saveOpen = false;
-  }}>
-    <div class="save-dialog" role="dialog" aria-label="Save request">
-      <h2><Save size={16} /> Save request</h2>
-      <label>
-        <span>Name</span>
-        <input
-          value={saveName}
-          placeholder="e.g. Create item"
-          oninput={(event) => (saveName = (event.target as HTMLInputElement).value)}
-          onkeydown={(event) => {
-            if (event.key === "Enter") void saveCurrent();
-            if (event.key === "Escape") saveOpen = false;
-          }}
-        />
-      </label>
-      <label>
-        <span>Collection</span>
-        <select
-          value={saveCollectionId}
-          onchange={(event) =>
-            (saveCollectionId = (event.target as HTMLSelectElement).value)}
-        >
-          {#if !saveCollections.length}
-            <option value="" disabled>No collections yet</option>
-          {/if}
-          {#each saveCollections as collection (collection.id)}
-            <option value={collection.id}>{collection.name}</option>
-          {/each}
-          <option value="__new__">＋ New collection…</option>
-        </select>
-        {#if saveCollectionId === "__new__"}
-          <input
-            value={saveNewName}
-            placeholder="Collection name"
-            oninput={(event) => (saveNewName = (event.target as HTMLInputElement).value)}
-            onkeydown={(event) => {
-              if (event.key === "Enter") void saveCurrent();
-              if (event.key === "Escape") saveCollectionId = saveCollections[0]?.id ?? "";
-            }}
-          />
-        {/if}
-      </label>
-      <div class="save-actions">
-        <span class="save-hint">
-          {loadedRequestId ? "Updates the loaded request." : "Saves as a new request."}
-        </span>
-        <button class="quiet" onclick={() => (saveOpen = false)}>Cancel</button>
-        <button class="primary" disabled={saveBusy} onclick={() => void saveCurrent()}>
-          {#if saveBusy}<span class="spinner"></span>{/if}
-          Save
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
