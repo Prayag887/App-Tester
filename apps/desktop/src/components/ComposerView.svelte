@@ -5,7 +5,7 @@
   // Pasting a curl command (in the URL bar or the import panel) fills the
   // whole composer from the native parser.
   import { onMount } from "svelte";
-  import { Plus, Send, TerminalSquare, Trash2 } from "lucide-svelte";
+  import { Check, Copy, Plus, Send, TerminalSquare, Trash2 } from "lucide-svelte";
   import * as api from "../api";
   import { byteSizeLabel, elapsedLabel, prettyJson } from "../lib";
   import { ui } from "../stores.svelte";
@@ -56,6 +56,7 @@
   let curlOpen = $state(false);
   let curlText = $state("");
   let curlTextarea = $state<HTMLTextAreaElement | undefined>();
+  let curlCopied = $state(false);
 
   // Flashes green on the Send button after a successful send.
   let sendFlash = $state(false);
@@ -151,6 +152,26 @@
       error = String(cause);
     } finally {
       busy = false;
+    }
+  }
+
+  async function copyCurl() {
+    if (!url.trim()) {
+      error = "Enter a URL to copy as cURL.";
+      return;
+    }
+    error = "";
+    try {
+      const command = await api.generateComposerCurl(
+        wireRequest(),
+        optionsOverride ?? DEFAULT_OPTIONS,
+      );
+      await navigator.clipboard.writeText(command);
+      curlCopied = true;
+      ui.notice = "Composer cURL copied.";
+      window.setTimeout(() => (curlCopied = false), 1200);
+    } catch (cause) {
+      error = `Could not copy cURL: ${String(cause)}`;
     }
   }
 
@@ -334,6 +355,13 @@
         aria-label="Import from curl"
         onclick={() => (curlOpen = !curlOpen)}
       ><TerminalSquare size={15} /></button>
+      <button
+        class:copied={curlCopied}
+        class="icon-button"
+        title={curlCopied ? "cURL copied" : "Copy request as cURL"}
+        aria-label={curlCopied ? "cURL copied" : "Copy request as cURL"}
+        onclick={() => void copyCurl()}
+      >{#if curlCopied}<Check size={15} />{:else}<Copy size={15} />{/if}</button>
       <button class="primary" class:success={sendFlash} disabled={busy} onclick={() => void send()}>
         {#if busy}<span class="spinner"></span>{:else}<Send size={15} />{/if}
         Send

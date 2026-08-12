@@ -69,6 +69,8 @@ export const sendRequest = async (request: ManualRequest, options: SendOptions):
 export interface CurlImport { request: ManualRequest; options: SendOptions }
 export const parseCurl = async (input: string): Promise<CurlImport> =>
   invoke("parse_curl", { input });
+export const generateComposerCurl = async (request: ManualRequest, options: SendOptions): Promise<string> =>
+  invoke("generate_composer_curl", { request, options });
 export const pickFile = async (): Promise<string | null> =>
   invoke("pick_file");
 export const prepareAndroidCertificateInstall = async (serial:string):Promise<AndroidCertificateInstall> =>

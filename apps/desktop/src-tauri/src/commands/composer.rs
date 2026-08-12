@@ -1,7 +1,10 @@
 //! Composer commands: send manually composed requests from the desktop shell.
 
 use androidqa_core::composer::{
-    curl::{CurlImport, parse_curl as parse_curl_core},
+    curl::{
+        CurlImport, generate_curl_command as generate_curl_command_core,
+        parse_curl as parse_curl_core,
+    },
     model::{ManualRequest, SendOptions, SendResult},
     send_manual,
 };
@@ -12,6 +15,16 @@ use crate::state::InspectorState;
 #[tauri::command]
 pub fn parse_curl(input: String) -> Result<CurlImport, String> {
     parse_curl_core(&input).map_err(|error| error.to_string())
+}
+
+/// Exports the current Composer request as an executable cURL command.
+#[tauri::command]
+pub fn generate_composer_curl(
+    request: ManualRequest,
+    options: Option<SendOptions>,
+) -> Result<String, String> {
+    generate_curl_command_core(&request, &options.unwrap_or_default())
+        .map_err(|error| error.to_string())
 }
 
 /// Opens a native file picker for multipart file fields; `None` when the
