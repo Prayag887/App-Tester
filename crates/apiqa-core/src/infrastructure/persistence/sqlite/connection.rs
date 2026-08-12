@@ -58,7 +58,7 @@ impl Database {
     }
 
     // Async wrappers — these live here so the Database struct is self-contained.
-    // The persistence modules (collections, history, etc.) call these.
+    // Persistence modules call these helpers.
 
     pub async fn upsert_async(
         self: &Arc<Self>,

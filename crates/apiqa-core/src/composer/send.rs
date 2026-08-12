@@ -19,7 +19,6 @@ use super::{
     body::{PreparedBody, prepare},
     capture::{CapturedBody, capture_bounded},
     model::{AuthSpec, ManualBody, ManualRequest, SendError, SendOptions, SendResult},
-    variables::{Variable, resolve_request},
 };
 use crate::{
     events::{EventBroadcaster, InspectorEvent},
@@ -76,11 +75,7 @@ pub async fn send_manual(
     session_id: Uuid,
     request: ManualRequest,
     options: SendOptions,
-    variables: &[Variable],
 ) -> Result<SendResult, SendError> {
-    // Resolve `{{name}}` placeholders first so the stored transaction shows
-    // exactly what went on the wire; the composer keeps the raw placeholders.
-    let request = resolve_request(&request, variables);
     let started = OffsetDateTime::now_utc();
     let started_ms = now_ms();
     let url = resolve_url(&request)?;
@@ -482,28 +477,13 @@ mod tests {
         request: ManualRequest,
         options: SendOptions,
     ) -> (SendResult, HttpTransaction, Vec<InspectorEvent>) {
-        send_with(request, options, &[]).await
-    }
-
-    async fn send_with(
-        request: ManualRequest,
-        options: SendOptions,
-        variables: &[crate::composer::variables::Variable],
-    ) -> (SendResult, HttpTransaction, Vec<InspectorEvent>) {
         let database = Arc::new(Database::open_in_memory().unwrap());
         let events = EventBroadcaster::default();
         let mut receiver = events.subscribe();
         let session_id = Uuid::new_v4();
-        let result = send_manual(
-            database.clone(),
-            events,
-            session_id,
-            request,
-            options,
-            variables,
-        )
-        .await
-        .unwrap();
+        let result = send_manual(database.clone(), events, session_id, request, options)
+            .await
+            .unwrap();
         let stored = database
             .transactions_between_async(
                 time::OffsetDateTime::now_utc() - time::Duration::minutes(1),
@@ -715,7 +695,6 @@ mod tests {
                 timeout_ms: 200,
                 ..Default::default()
             },
-            &[],
         )
         .await;
 
@@ -769,70 +748,6 @@ mod tests {
                 .headers
                 .iter()
                 .any(|header| header.name.eq_ignore_ascii_case("authorization"))
-        );
-    }
-
-    #[tokio::test]
-    async fn resolves_environment_variables_before_sending() {
-        let port = serve(|request| {
-            let text = String::from_utf8_lossy(request);
-            if text.starts_with("GET /v1/items?key=abc123")
-                && text.to_ascii_lowercase().contains("x-tenant: acme")
-            {
-                http_response("200 OK", "application/json", "{\"ok\":true}")
-            } else {
-                http_response("400 Bad Request", "text/plain", "unresolved")
-            }
-        })
-        .await;
-        let (result, stored, _) = send_with(
-            ManualRequest {
-                method: "GET".into(),
-                url: format!("http://127.0.0.1:{port}/{{{{base_path}}}}/items?key={{{{api_key}}}}"),
-                query: vec![],
-                headers: vec![HeaderEntry {
-                    name: "X-Tenant".into(),
-                    value: "{{tenant}}".into(),
-                }],
-                body: ManualBody::None,
-                auth: AuthSpec::None,
-            },
-            SendOptions::default(),
-            &[
-                crate::composer::variables::Variable {
-                    name: "base_path".into(),
-                    value: "v1".into(),
-                    is_secret: false,
-                },
-                crate::composer::variables::Variable {
-                    name: "api_key".into(),
-                    value: "abc123".into(),
-                    is_secret: true,
-                },
-                crate::composer::variables::Variable {
-                    name: "tenant".into(),
-                    value: "acme".into(),
-                    is_secret: false,
-                },
-            ],
-        )
-        .await;
-        assert_eq!(result.status, 200);
-        // The stored request shows the resolved wire values.
-        assert_eq!(stored.request.path, "/v1/items");
-        assert!(
-            stored
-                .request
-                .query
-                .iter()
-                .any(|entry| entry.name == "key" && entry.value == "abc123")
-        );
-        assert!(
-            stored
-                .request
-                .headers
-                .iter()
-                .any(|header| header.name == "X-Tenant" && header.value == "acme")
         );
     }
 
