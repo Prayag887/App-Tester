@@ -33,4 +33,27 @@ describe("composer IPC argument shapes", () => {
 
     expect(mockInvoke).toHaveBeenCalledWith("send_request", { request, options });
   });
+
+  it("generates cURL with the request and transport options", async () => {
+    mockInvoke.mockResolvedValue("curl");
+    const request: ManualRequest = {
+      method: "GET",
+      url: "https://api.test/v1",
+      query: [],
+      headers: [],
+      body: { kind: "none" },
+      auth: { kind: "none" },
+    };
+    const options: SendOptions = {
+      follow_redirects: true,
+      max_redirects: 5,
+      timeout_ms: 30_000,
+      verify_tls: true,
+      proxy_url: null,
+    };
+
+    await api.generateComposerCurl(request, options);
+
+    expect(mockInvoke).toHaveBeenCalledWith("generate_composer_curl", { request, options });
+  });
 });

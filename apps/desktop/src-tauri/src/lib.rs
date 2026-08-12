@@ -107,6 +107,7 @@ pub fn run() {
             traffic::get_comparison_rules,
             traffic::save_comparison_rules,
             composer::parse_curl,
+            composer::generate_composer_curl,
             composer::pick_file,
             composer::send_request
         ])

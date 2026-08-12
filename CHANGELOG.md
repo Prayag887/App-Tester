@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.8] - 2026-08-12
+
+- Simplified Composer by removing collections, environments, and request history.
+- Added runnable cURL copying for requests configured in Composer.
+- Made Windows and Linux releases tag-driven with duplicate-release protection.
+
 ## [0.1.2] - 2026-07-30
 
 ### Added

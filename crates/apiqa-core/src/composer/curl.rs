@@ -6,10 +6,11 @@
 //! dropping data. Shell quoting is honored (single/double quotes, backslash
 //! escapes, line continuations) but no environment expansion happens.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::Serialize;
 
 use super::{
-    body::percent_encode,
+    body::{encode_urlencoded, percent_encode},
     model::{AuthSpec, ManualBody, ManualRequest, MultipartField, SendOptions},
 };
 use crate::traffic::{HeaderEntry, QueryParameter};
@@ -36,6 +37,167 @@ pub enum ParseError {
 pub struct CurlImport {
     pub request: ManualRequest,
     pub options: SendOptions,
+}
+
+/// Builds a runnable cURL command from the current Composer request. This
+/// preserves locally entered credentials so the copied command can be run.
+pub fn generate_curl_command(
+    request: &ManualRequest,
+    options: &SendOptions,
+) -> Result<String, ParseError> {
+    let mut url = url::Url::parse(&request.url).map_err(|_| ParseError::MissingUrl)?;
+    for entry in &request.query {
+        url.query_pairs_mut().append_pair(&entry.name, &entry.value);
+    }
+    if let AuthSpec::ApiKey {
+        key,
+        value,
+        in_query: true,
+    } = &request.auth
+    {
+        url.query_pairs_mut().append_pair(key, value);
+    }
+
+    let mut args = vec![
+        "curl".to_owned(),
+        "--request".to_owned(),
+        request.method.clone(),
+        "--url".to_owned(),
+        shell_quote(url.as_str()),
+    ];
+    if options.follow_redirects {
+        args.push("--location".to_owned());
+        args.extend(["--max-redirs".to_owned(), options.max_redirects.to_string()]);
+    }
+    if !options.verify_tls {
+        args.push("--insecure".to_owned());
+    }
+    if options.timeout_ms > 0 {
+        args.extend([
+            "--max-time".to_owned(),
+            format!("{:.3}", options.timeout_ms as f64 / 1000.0),
+        ]);
+    }
+    if let Some(proxy) = options
+        .proxy_url
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        args.extend(["--proxy".to_owned(), shell_quote(proxy)]);
+    }
+
+    for header in &request.headers {
+        if !matches!(
+            header.name.to_ascii_lowercase().as_str(),
+            "host" | "content-length" | "connection" | "proxy-connection" | "accept-encoding"
+        ) {
+            args.extend([
+                "--header".to_owned(),
+                shell_quote(&format!("{}: {}", header.name, header.value)),
+            ]);
+        }
+    }
+    match &request.auth {
+        AuthSpec::Bearer { token } => args.extend([
+            "--header".to_owned(),
+            shell_quote(&format!("Authorization: Bearer {token}")),
+        ]),
+        AuthSpec::Basic { username, password } => args.extend([
+            "--header".to_owned(),
+            shell_quote(&format!(
+                "Authorization: Basic {}",
+                BASE64.encode(format!("{username}:{password}"))
+            )),
+        ]),
+        AuthSpec::ApiKey {
+            key,
+            value,
+            in_query: false,
+        } => args.extend([
+            "--header".to_owned(),
+            shell_quote(&format!("{key}: {value}")),
+        ]),
+        AuthSpec::None | AuthSpec::ApiKey { in_query: true, .. } => {}
+    }
+
+    match &request.body {
+        ManualBody::None => {}
+        ManualBody::Form { fields } => {
+            add_content_type_if_missing(&mut args, request, "application/x-www-form-urlencoded");
+            args.extend([
+                "--data-raw".to_owned(),
+                shell_quote(&encode_urlencoded(fields)),
+            ]);
+        }
+        ManualBody::Raw { media_type, text } => {
+            if let Some(media_type) = media_type {
+                add_content_type_if_missing(&mut args, request, media_type);
+            }
+            args.extend(["--data-raw".to_owned(), shell_quote(text)]);
+        }
+        ManualBody::Binary { bytes } => args.extend([
+            "--data-binary".to_owned(),
+            shell_quote(&String::from_utf8_lossy(bytes)),
+        ]),
+        ManualBody::Multipart { fields } => {
+            for field in fields {
+                let value = if let Some(path) = &field.file {
+                    let mut value = format!("{}=@{path}", field.name);
+                    if let Some(media_type) = &field.media_type {
+                        value.push_str(&format!(";type={media_type}"));
+                    }
+                    value
+                } else {
+                    format!(
+                        "{}={}",
+                        field.name,
+                        field.value.as_deref().unwrap_or_default()
+                    )
+                };
+                args.extend(["--form".to_owned(), shell_quote(&value)]);
+            }
+        }
+    }
+
+    Ok(multiline_args(&args))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn add_content_type_if_missing(args: &mut Vec<String>, request: &ManualRequest, media_type: &str) {
+    if !request
+        .headers
+        .iter()
+        .any(|header| header.name.eq_ignore_ascii_case("content-type"))
+    {
+        args.extend([
+            "--header".to_owned(),
+            shell_quote(&format!("Content-Type: {media_type}")),
+        ]);
+    }
+}
+
+fn multiline_args(args: &[String]) -> String {
+    let mut lines = Vec::with_capacity(args.len());
+    let mut index = 0;
+    while index < args.len() {
+        if index == 0 {
+            lines.push(args[index].clone());
+            index += 1;
+        } else if args[index].starts_with("--")
+            && index + 1 < args.len()
+            && !args[index + 1].starts_with("--")
+        {
+            lines.push(format!("  {} {}", args[index], args[index + 1]));
+            index += 2;
+        } else {
+            lines.push(format!("  {}", args[index]));
+            index += 1;
+        }
+    }
+    lines.join(" \\\n")
 }
 
 /// Accumulated parse state, threaded through the option dispatcher.
@@ -900,5 +1062,65 @@ mod tests {
                 text: "{\"name\":\"widget\"}".into()
             }
         );
+    }
+
+    #[test]
+    fn exports_runnable_composer_curl_with_auth_query_and_body() {
+        let request = ManualRequest {
+            method: "POST".into(),
+            url: "https://api.test/v1/items?existing=yes".into(),
+            query: vec![QueryParameter {
+                name: "search".into(),
+                value: "two words".into(),
+            }],
+            headers: vec![HeaderEntry {
+                name: "X-Tenant".into(),
+                value: "it's-us".into(),
+            }],
+            body: ManualBody::Raw {
+                media_type: Some("application/json".into()),
+                text: "{\"name\":\"widget\"}".into(),
+            },
+            auth: AuthSpec::Bearer {
+                token: "secret-token".into(),
+            },
+        };
+        let command = generate_curl_command(&request, &SendOptions::default()).unwrap();
+
+        assert!(command.contains("--request POST"));
+        assert!(command.contains("existing=yes&search=two+words"));
+        assert!(command.contains("X-Tenant: it'\"'\"'s-us"));
+        assert!(command.contains("Authorization: Bearer secret-token"));
+        assert!(command.contains("Content-Type: application/json"));
+        assert!(command.contains("--data-raw '{\"name\":\"widget\"}'"));
+        assert!(command.contains("--location"));
+        assert!(command.contains("--max-time 30.000"));
+    }
+
+    #[test]
+    fn exports_multipart_files_and_transport_options() {
+        let request = ManualRequest {
+            method: "POST".into(),
+            url: "https://api.test/upload".into(),
+            body: ManualBody::Multipart {
+                fields: vec![MultipartField {
+                    name: "artifact".into(),
+                    value: None,
+                    file: Some("/tmp/my file.zip".into()),
+                    media_type: Some("application/zip".into()),
+                }],
+            },
+            ..ManualRequest::default()
+        };
+        let options = SendOptions {
+            verify_tls: false,
+            proxy_url: Some("http://localhost:8080".into()),
+            ..SendOptions::default()
+        };
+        let command = generate_curl_command(&request, &options).unwrap();
+
+        assert!(command.contains("--insecure"));
+        assert!(command.contains("--proxy 'http://localhost:8080'"));
+        assert!(command.contains("--form 'artifact=@/tmp/my file.zip;type=application/zip'"));
     }
 }

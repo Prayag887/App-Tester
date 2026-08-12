@@ -2,7 +2,7 @@ name: Release Windows and Linux
 
 on:
   push:
-    branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       companion_apk_url:
@@ -18,8 +18,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-version:
+    name: Validate release version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure version and release are new
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
+          TAG="v${VERSION}"
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF_NAME}" != "${TAG}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match app version ${TAG}."
+            exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; bump the app version before releasing."
+            exit 1
+          fi
+
   desktop:
     name: Desktop (${{ matrix.name }})
+    needs: validate-version
     strategy:
       fail-fast: false
       matrix:

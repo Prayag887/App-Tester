@@ -9,6 +9,7 @@ import type { SendResult } from "../types";
 
 vi.mock("../api", () => ({
   sendRequest: vi.fn(),
+  generateComposerCurl: vi.fn(),
   parseCurl: vi.fn(),
   pickFile: vi.fn(),
 }));
@@ -33,6 +34,7 @@ beforeEach(() => {
   ui.notice = "";
   ui.composerDraft = null;
   mockedApi.sendRequest.mockResolvedValue(sendResult);
+  mockedApi.generateComposerCurl.mockResolvedValue("curl --request GET --url 'https://api.test/v1'");
 });
 
 const urlInput = () => screen.getByLabelText("Request URL") as HTMLInputElement;
@@ -92,6 +94,19 @@ describe("ComposerView", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     expect(screen.getByText("Enter a URL to send.")).toBeTruthy();
     expect(mockedApi.sendRequest).not.toHaveBeenCalled();
+  });
+
+  it("copies the current request as cURL", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    render(ComposerView);
+    await user.type(urlInput(), "https://api.test/v1");
+    await user.click(screen.getByRole("button", { name: "Copy request as cURL" }));
+
+    await waitFor(() => expect(mockedApi.generateComposerCurl).toHaveBeenCalled());
+    expect(mockedApi.generateComposerCurl.mock.calls[0][0].url).toBe("https://api.test/v1");
+    expect(writeText).toHaveBeenCalledWith("curl --request GET --url 'https://api.test/v1'");
+    expect(screen.getByRole("button", { name: "cURL copied" })).toBeTruthy();
   });
 
   it("does not expose collections, environments, or request history", () => {
