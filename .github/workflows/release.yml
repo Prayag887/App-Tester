@@ -4,11 +4,6 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      companion_apk_url:
-        description: Optional direct URL to a locally built companion APK release asset (defaults to the APK from the latest release, falling back to v0.2.4's asset).
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -38,9 +33,33 @@ jobs:
             exit 1
           fi
 
+  companion:
+    name: Companion APK
+    needs: validate-version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build current Companion release
+        run: |
+          cd apps/companion
+          flutter build apk --release --split-per-abi
+          node ../../scripts/sync-companion-release.mjs app-arm64-v8a-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-apk
+          path: apps/companion/releases/app-tester-companion.apk
+          if-no-files-found: error
+
   desktop:
     name: Desktop (${{ matrix.name }})
-    needs: validate-version
+    needs: [validate-version, companion]
     strategy:
       fail-fast: false
       matrix:
@@ -67,24 +86,10 @@ jobs:
       - name: Install Linux webview dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - name: Resolve locally built companion APK
-        shell: bash
-        run: |
-          mkdir -p apps/companion/releases
-          if [ -n "${{ inputs.companion_apk_url }}" ]; then
-            echo "Using provided APK URL"
-            curl --fail --location --retry 3 "${{ inputs.companion_apk_url }}" \
-              --output apps/companion/releases/app-tester-companion.apk
-          else
-            echo "No APK URL provided; trying the latest release asset"
-            curl --fail --location --retry 3 \
-              "https://github.com/Prayag887/App-Tester/releases/latest/download/app-tester-companion.apk" \
-              --output apps/companion/releases/app-tester-companion.apk \
-              || { echo "Latest release has no APK yet; falling back to v0.2.4 asset"; \
-                   curl --fail --location --retry 3 \
-                   "https://github.com/Prayag887/App-Tester/releases/download/v0.2.4/app-tester-companion.apk" \
-                   --output apps/companion/releases/app-tester-companion.apk; }
-          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: companion-apk
+          path: apps/companion/releases
       - run: pnpm install --frozen-lockfile
       - uses: tauri-apps/tauri-action@v1
         env:
@@ -105,3 +110,20 @@ jobs:
           updaterJsonPreferNsis: true
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
+
+  publish-companion:
+    name: Publish Companion APK
+    needs: [validate-version, companion, desktop]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: companion-apk
+          path: release-assets
+      - name: Attach Companion APK to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
+          gh release upload "v${VERSION}" release-assets/app-tester-companion.apk --clobber

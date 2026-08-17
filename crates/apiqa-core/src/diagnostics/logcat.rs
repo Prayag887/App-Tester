@@ -1,4 +1,4 @@
-//! Logcat supervision: streaming, incident batching, and reconnection.
+//! Logcat supervision: streaming and incident batching for one USB session.
 //!
 //! The supervisor owns the ADB logcat process lifecycle. Pure helpers
 //! ([`LogcatIncidentBuffer`], [`logcat_command`]) keep burst-boundary and
@@ -24,7 +24,6 @@ use crate::events::{EventBroadcaster, InspectorEvent};
 
 pub const CONTEXT_CAPACITY: usize = 50;
 pub const IDLE_FLUSH_TIMEOUT: Duration = Duration::from_millis(700);
-pub const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(15);
 /// A chatty device can keep logcat busy for minutes at a time, so the idle
 /// window never opens. Flush the pending burst once it reaches this size so
 /// incidents still surface on high-volume devices.
@@ -157,7 +156,7 @@ pub async fn emit_incident(
     }
 }
 
-/// Owns the logcat process task and its reconnect loop.
+/// Owns one logcat process for the explicit USB capture session.
 pub struct LogcatSupervisor {
     task: Mutex<Option<JoinHandle<()>>>,
 }
@@ -183,7 +182,7 @@ impl LogcatSupervisor {
         }
     }
 
-    /// Spawns the supervision loop against an arbitrary program so tests can
+    /// Spawns one supervised process against an arbitrary program so tests can
     /// drive it with a shell script instead of ADB.
     #[allow(clippy::too_many_arguments)]
     pub fn spawn(
@@ -198,90 +197,85 @@ impl LogcatSupervisor {
     ) {
         self.abort();
         let task = tokio::spawn(async move {
-            let mut reconnect_delay = Duration::from_secs(1);
             let mut last_emit = tokio::time::Instant::now()
                 .checked_sub(MIN_EMIT_INTERVAL * 2)
                 .unwrap_or_else(tokio::time::Instant::now);
+            let Ok(mut child) = Command::new(&program)
+                .args(&args)
+                .kill_on_drop(true)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            else {
+                return;
+            };
+            let Some(stdout) = child.stdout.take() else {
+                return;
+            };
+            let mut lines = BufReader::new(stdout).lines();
+            let mut buffer = LogcatIncidentBuffer::default();
             loop {
-                let mut child = match Command::new(&program)
-                    .args(&args)
-                    .kill_on_drop(true)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                {
-                    Ok(child) => child,
-                    Err(_) => {
-                        tokio::time::sleep(reconnect_delay).await;
-                        reconnect_delay = (reconnect_delay * 2).min(MAX_RECONNECT_DELAY);
-                        continue;
-                    }
-                };
-                let Some(stdout) = child.stdout.take() else {
-                    tokio::time::sleep(reconnect_delay).await;
-                    reconnect_delay = (reconnect_delay * 2).min(MAX_RECONNECT_DELAY);
-                    continue;
-                };
-                reconnect_delay = Duration::from_secs(1);
-                let mut lines = BufReader::new(stdout).lines();
-                let mut buffer = LogcatIncidentBuffer::default();
-                loop {
-                    match tokio::time::timeout(IDLE_FLUSH_TIMEOUT, lines.next_line()).await {
-                        Ok(Ok(Some(line))) => {
-                            if let Some(log_line) = super::parse_logcat_epoch_line(&line) {
-                                buffer.push(log_line);
-                            }
-                            // A chatty device never reaches the idle window;
-                            // flush once the burst is large enough, but never
-                            // more often than MIN_EMIT_INTERVAL so the
-                            // foreground-activity query stays cheap.
-                            if buffer.pending_len() >= MAX_PENDING_BEFORE_FLUSH
-                                && last_emit.elapsed() >= MIN_EMIT_INTERVAL
-                                && let Some(pending) = buffer.flush_forced()
-                            {
-                                last_emit = tokio::time::Instant::now();
-                                emit_incident(
-                                    &events,
-                                    session_id,
-                                    &package_name,
-                                    &adb_path,
-                                    &serial,
-                                    pending,
-                                )
-                                .await;
-                            }
-                        }
-                        Ok(Ok(None)) | Ok(Err(_)) => {
+                tokio::select! {
+                    // If the runtime was busy long enough for both branches to
+                    // become ready, preserve the idle boundary instead of
+                    // merging the next line into the previous incident.
+                    biased;
+                    _ = tokio::time::sleep(IDLE_FLUSH_TIMEOUT) => {
+                        if let Some(pending) = buffer.flush_if_idle(IDLE_FLUSH_TIMEOUT) {
                             emit_incident(
                                 &events,
                                 session_id,
                                 &package_name,
                                 &adb_path,
                                 &serial,
-                                buffer.flush_if_idle(IDLE_FLUSH_TIMEOUT).unwrap_or_default(),
+                                pending,
                             )
                             .await;
-                            break;
                         }
-                        Err(_) => {
-                            if let Some(pending) = buffer.flush_if_idle(IDLE_FLUSH_TIMEOUT) {
+                    }
+                    line = lines.next_line() => {
+                        match line {
+                            Ok(Some(line)) => {
+                                if let Some(log_line) = super::parse_logcat_epoch_line(&line) {
+                                    buffer.push(log_line);
+                                }
+                                // A chatty device never reaches the idle window;
+                                // flush once the burst is large enough, but never
+                                // more often than MIN_EMIT_INTERVAL so the
+                                // foreground-activity query stays cheap.
+                                if buffer.pending_len() >= MAX_PENDING_BEFORE_FLUSH
+                                    && last_emit.elapsed() >= MIN_EMIT_INTERVAL
+                                    && let Some(pending) = buffer.flush_forced()
+                                {
+                                    last_emit = tokio::time::Instant::now();
+                                    emit_incident(
+                                        &events,
+                                        session_id,
+                                        &package_name,
+                                        &adb_path,
+                                        &serial,
+                                        pending,
+                                    )
+                                    .await;
+                                }
+                            }
+                            Ok(None) | Err(_) => {
                                 emit_incident(
                                     &events,
                                     session_id,
                                     &package_name,
                                     &adb_path,
                                     &serial,
-                                    pending,
+                                    buffer.flush_if_idle(IDLE_FLUSH_TIMEOUT).unwrap_or_default(),
                                 )
                                 .await;
+                                break;
                             }
                         }
                     }
                 }
-                let _ = child.wait().await;
-                tokio::time::sleep(reconnect_delay).await;
-                reconnect_delay = (reconnect_delay * 2).min(MAX_RECONNECT_DELAY);
             }
+            let _ = child.wait().await;
         });
         *self
             .task
@@ -398,8 +392,8 @@ exit 0
         supervisor.spawn(
             PathBuf::from("/bin/sh"),
             vec!["-c".into(), script.into()],
-            PathBuf::from("/bin/sh"),
-            "emulator-5554".into(),
+            PathBuf::from("/usr/bin/true"),
+            "usb-serial".into(),
             events.clone(),
             Uuid::new_v4(),
             "com.example".into(),

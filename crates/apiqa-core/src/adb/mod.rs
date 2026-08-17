@@ -10,14 +10,6 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ConnectionType {
-    Usb,
-    Wireless,
-    Emulator,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum AuthorizationStatus {
     Authorized,
     Unauthorized,
@@ -28,7 +20,6 @@ pub enum AuthorizationStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AndroidDevice {
     pub serial: String,
-    pub connection_type: ConnectionType,
     pub authorization_status: AuthorizationStatus,
     pub model: Option<String>,
     pub android_version: Option<String>,
@@ -341,12 +332,16 @@ pub fn parse_device_list(output: &str) -> Vec<AndroidDevice> {
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
             let serial = fields.next()?.to_owned();
+            // App Tester supports physical USB transports only. ADB exposes
+            // emulators as `emulator-*` and network transports as host:port.
+            if serial.starts_with("emulator-") || serial.contains(':') {
+                return None;
+            }
             let state = fields.next().unwrap_or("unknown");
             let metadata = fields
                 .filter_map(|field| field.split_once(':'))
                 .collect::<std::collections::HashMap<_, _>>();
             Some(AndroidDevice {
-                connection_type: classify_connection(&serial),
                 authorization_status: match state {
                     "device" => AuthorizationStatus::Authorized,
                     "unauthorized" => AuthorizationStatus::Unauthorized,
@@ -364,16 +359,6 @@ pub fn parse_device_list(output: &str) -> Vec<AndroidDevice> {
             })
         })
         .collect()
-}
-
-pub fn classify_connection(serial: &str) -> ConnectionType {
-    if serial.starts_with("emulator-") {
-        ConnectionType::Emulator
-    } else if serial.contains(':') {
-        ConnectionType::Wireless
-    } else {
-        ConnectionType::Usb
-    }
 }
 
 #[cfg(test)]
@@ -459,24 +444,22 @@ mod tests {
     }
 
     #[test]
-    fn parses_and_classifies_adb_devices() {
+    fn lists_only_physical_usb_devices() {
         let output = "List of devices attached\n\
 emulator-5554 device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 transport_id:1\n\
 192.168.1.7:37099 device product:oriole model:Pixel_6 transport_id:2\n\
 R58M123 unauthorized usb:1-1 product:x model:Galaxy_S22\n\
 deadbeef offline\n";
         let devices = parse_device_list(output);
-        assert_eq!(devices.len(), 4);
-        assert_eq!(devices[0].connection_type, ConnectionType::Emulator);
-        assert_eq!(devices[1].connection_type, ConnectionType::Wireless);
-        assert_eq!(devices[2].connection_type, ConnectionType::Usb);
-        assert_eq!(devices[2].model.as_deref(), Some("Galaxy S22"));
+        assert_eq!(devices.len(), 2);
+        assert_eq!(devices[0].serial, "R58M123");
+        assert_eq!(devices[0].model.as_deref(), Some("Galaxy S22"));
         assert_eq!(
-            devices[2].authorization_status,
+            devices[0].authorization_status,
             AuthorizationStatus::Unauthorized
         );
         assert_eq!(
-            devices[3].authorization_status,
+            devices[1].authorization_status,
             AuthorizationStatus::Offline
         );
     }

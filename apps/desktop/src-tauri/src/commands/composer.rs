@@ -46,7 +46,7 @@ pub async fn send_request(
     options: Option<SendOptions>,
 ) -> Result<SendResult, String> {
     let session_id = state.session.id_or_new();
-    send_manual(
+    let mut result = send_manual(
         state.database.clone(),
         state.proxy.events(),
         session_id,
@@ -54,5 +54,7 @@ pub async fn send_request(
         options.unwrap_or_default(),
     )
     .await
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+    crate::ui_payload::cap_send_result(&mut result);
+    Ok(result)
 }

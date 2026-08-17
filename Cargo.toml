@@ -3,7 +3,7 @@ members = ["crates/apiqa-core", "apps/desktop/src-tauri", "apps/cli"]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.8"
+version = "0.2.9"
 edition = "2024"
 license = "GPL-3.0-only"
 authors = ["Prayag"]
@@ -18,7 +18,6 @@ base64 = "0.22.1"
 hudsucker = { version = "0.25.0", features = ["http2"] }
 http-body = "1.0.2"
 http-body-util = "0.1.3"
-qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["form", "json", "multipart", "query", "rustls", "stream", "gzip", "brotli", "deflate"] }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 regex = "1.12.2"

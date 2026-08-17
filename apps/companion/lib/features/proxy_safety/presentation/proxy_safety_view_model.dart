@@ -18,44 +18,8 @@ class ProxySafetyViewModel extends ChangeNotifier {
     _syncRefreshTimer();
   }
 
-  /// Connection choices belong to the person using the companion. The desktop
-  /// only opens this screen; it never starts or stops the phone's VPN.
-  Future<void> connectVpn({
-    required String host,
-    required String portText,
-    required String targetPackage,
-  }) async {
-    final port = int.tryParse(portText);
-    if (host.trim().isEmpty ||
-        port == null ||
-        port < 1 ||
-        port > 65535 ||
-        targetPackage.trim().isEmpty) {
-      error =
-          'Enter a desktop host, a port from 1 to 65535, and a package name.';
-      notifyListeners();
-      return;
-    }
-    await _run(
-        () => _repository.startMonitoring(host: host.trim(), port: port));
-    if (error == null) {
-      await _run(() => _repository.startVpn(
-            host: host.trim(),
-            port: port,
-            targetPackage: targetPackage.trim(),
-          ));
-    }
-    _syncRefreshTimer();
-  }
-
   Future<void> stopVpn() async {
     await _run(_repository.stopVpn);
-    _syncRefreshTimer();
-  }
-
-  Future<void> disconnect() async {
-    if (status?.isVpnActive == true) await _run(_repository.stopVpn);
-    await _run(_repository.stopMonitoring);
     _syncRefreshTimer();
   }
 

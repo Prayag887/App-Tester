@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.9] - 2026-08-17
+
+- Replaced wireless, emulator, and QR connection paths with a single physical-USB capture flow backed by ADB reverse and the per-app Companion VPN.
+- Reworked the desktop traffic inspector with resizable panels, bounded WebView payloads, lazy transaction details, and a virtualized request list.
+- Simplified Companion capture status and fail-open handling for explicit USB sessions.
+- Hardened logcat incident boundaries and subprocess coverage under interactive release checks.
+
 ## [0.2.8] - 2026-08-12
 
 - Simplified Composer by removing collections, environments, and request history.

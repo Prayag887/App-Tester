@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
 import android.net.VpnService
-import android.content.pm.PackageManager
 import java.net.HttpURLConnection
 import java.net.URL
 import org.json.JSONArray
@@ -25,28 +24,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 try {
                     val status = when (call.method) {
-                        "installedDebugApps" -> {
-                            @Suppress("DEPRECATION")
-                            val apps = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-                                .filter { info -> info.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 }
-                                .map { info -> mapOf("package_name" to info.packageName, "label" to packageManager.getApplicationLabel(info).toString()) }
-                                .sortedBy { it["label"] }
-                            result.success(apps)
-                            return@setMethodCallHandler
-                        }
                         "status" -> controller.status()
-                        "startMonitoring" -> {
-                            val host = call.argument<String>("host") ?: error("Desktop host is required.")
-                            val port = call.argument<Int>("port") ?: error("Proxy port is required.")
-                            controller.startMonitoring(host, port)
-                        }
-                        "stopMonitoring" -> controller.stopMonitoring()
-                        "startVpn" -> {
-                            val host = call.argument<String>("host") ?: error("Desktop host is required.")
-                            val port = call.argument<Int>("port") ?: error("Proxy port is required.")
-                            val targetPackage = call.argument<String>("targetPackage") ?: error("Selected package is required.")
-                            startVpnCapture(host, port, targetPackage)
-                        }
                         "stopVpn" -> controller.stopVpn()
                         else -> {
                             result.notImplemented()
@@ -99,15 +77,6 @@ class MainActivity : FlutterActivity() {
         }
         val host = intent?.getStringExtra(EXTRA_HOST) ?: return
         val port = intent.getIntExtra(EXTRA_PORT, 0)
-        if (intent.getBooleanExtra(EXTRA_CONFIGURE_ONLY, false)) {
-            val targetPackage = intent.getStringExtra(EXTRA_PACKAGE)
-            if (port in 1..65535) controller.startMonitoring(host, port, targetPackage)
-            intent.removeExtra(EXTRA_HOST)
-            intent.removeExtra(EXTRA_PORT)
-            intent.removeExtra(EXTRA_PACKAGE)
-            intent.removeExtra(EXTRA_CONFIGURE_ONLY)
-            return
-        }
         val token = intent.getStringExtra(EXTRA_TOKEN) ?: return
         val targetPackage = intent.getStringExtra(EXTRA_PACKAGE) ?: return
         if (port !in 1..65535 || targetPackage.isBlank()) return
@@ -119,7 +88,7 @@ class MainActivity : FlutterActivity() {
         intent.removeExtra(EXTRA_TOKEN)
         intent.removeExtra(EXTRA_PACKAGE)
         controller.startMonitoring(host, port)
-        registerWithDesktop(host, port, token)
+        registerWithDesktop(host, port, token, targetPackage)
         startVpnCapture(host, port, targetPackage)
     }
 
@@ -158,42 +127,37 @@ class MainActivity : FlutterActivity() {
         controller.record("VPN capture started. Opened $targetPackage for testing.")
     }
 
-    private fun registerWithDesktop(host: String, port: Int, token: String) {
-        val apps = @Suppress("DEPRECATION") packageManager
-            .getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { info -> info.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 }
-            .map { info ->
-                JSONObject()
-                    .put("package_name", info.packageName)
-                    .put("label", packageManager.getApplicationLabel(info).toString())
-            }
+    private fun registerWithDesktop(host: String, port: Int, token: String, targetPackage: String) {
+        val targetInfo = packageManager.getApplicationInfo(targetPackage, 0)
+        val apps = listOf(
+            JSONObject()
+                .put("package_name", targetPackage)
+                .put("label", packageManager.getApplicationLabel(targetInfo).toString()),
+        )
         Thread {
-            repeat(3) { attempt ->
-                val connection = runCatching {
-                    (URL("http://$host:$port/__app_tester/companion/register").openConnection() as HttpURLConnection).apply {
-                        requestMethod = "POST"
-                        connectTimeout = 2_000
-                        readTimeout = 2_000
-                        doOutput = true
-                        setRequestProperty("Content-Type", "application/json")
-                    }
-                }.getOrElse { error ->
-                    controller.record("Could not create desktop USB connection: ${error.message}")
-                    return@repeat
+            val connection = runCatching {
+                (URL("http://$host:$port/__app_tester/companion/register").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 2_000
+                    readTimeout = 2_000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
                 }
-                runCatching {
-                    connection.outputStream.bufferedWriter().use { writer ->
-                        writer.write(JSONObject().put("token", token).put("apps", JSONArray(apps)).toString())
-                    }
-                    if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                        controller.record("Desktop USB connection established.")
-                        return@Thread
-                    }
-                    controller.record("Desktop rejected the USB companion connection.")
-                }.onFailure { error -> controller.record("USB connection attempt failed: ${error.message}") }
-                    .also { connection.disconnect() }
-                if (attempt < 2) Thread.sleep(500)
+            }.getOrElse { error ->
+                controller.record("Could not create desktop USB connection: ${error.message}")
+                return@Thread
             }
+            runCatching {
+                connection.outputStream.bufferedWriter().use { writer ->
+                    writer.write(JSONObject().put("token", token).put("apps", JSONArray(apps)).toString())
+                }
+                if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                    controller.record("Desktop USB connection established.")
+                } else {
+                    controller.record("Desktop rejected the USB companion connection.")
+                }
+            }.onFailure { error -> controller.record("USB connection failed: ${error.message}") }
+                .also { connection.disconnect() }
         }.start()
     }
 
@@ -203,7 +167,6 @@ class MainActivity : FlutterActivity() {
         const val EXTRA_PORT = "app_tester_port"
         const val EXTRA_TOKEN = "app_tester_token"
         const val EXTRA_PACKAGE = "app_tester_package"
-        const val EXTRA_CONFIGURE_ONLY = "app_tester_configure_only"
         const val EXTRA_STOP_VPN = "app_tester_stop_vpn"
     }
 }

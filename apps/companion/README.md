@@ -1,13 +1,13 @@
 # App Tester Companion
 
-The companion is a regular Android application: it does not request device-owner, device-admin, accessibility, or root access. It provides a branded desktop-link screen and a persistent activity log so a person can verify that the desktop endpoint is reachable before starting a desktop capture.
+The companion is a regular Android application: it does not request device-owner, device-admin, accessibility, camera, broad package-query, or root access. It provides a USB capture status screen and a persistent activity log.
 
 ## What it does
 
-1. Accepts the **Desktop host** displayed in green by the desktop App Tester capture header and the Android package selected for capture.
+1. Receives a loopback desktop endpoint and selected Android package through an explicit ADB intent over USB.
 2. Requests Android's normal one-time VPN consent and routes **only that package** through the desktop HTTP capture proxy.
 3. Runs a complete `tun2socks` packet-forwarding engine in the foreground VPN service, including TCP, UDP, DNS, IPv4, and IPv6 handling.
-4. Checks the desktop endpoint every five seconds. After three failures, it stops the VPN; Android restores the selected app's direct networking automatically.
+4. Checks the USB-backed desktop endpoint every five seconds. After three failures, it stops the VPN; Android restores the selected app's direct networking automatically.
 5. Retains endpoint and VPN lifecycle events in the in-app activity log.
 
 ## Permissions and behavior

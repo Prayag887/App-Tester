@@ -1,6 +1,6 @@
 //! Cached ADB access and shared command helpers.
 
-use std::{net::UdpSocket, sync::OnceLock};
+use std::sync::OnceLock;
 
 use androidqa_core::{AdbRunner, ProcessAdb};
 
@@ -29,20 +29,6 @@ where
         .map_err(|error| format!("ADB task failed: {error}"))?
 }
 
-/// Best-effort IPv4 address of this machine on its local network, used as the
-/// proxy host for physical devices.
-pub fn lan_ipv4() -> Result<String, String> {
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|error| format!("could not inspect the Mac network: {error}"))?;
-    socket
-        .connect("8.8.8.8:80")
-        .map_err(|error| format!("could not determine the Mac Wi-Fi address: {error}"))?;
-    match socket.local_addr().map_err(|error| error.to_string())?.ip() {
-        std::net::IpAddr::V4(address) if !address.is_loopback() => Ok(address.to_string()),
-        _ => Err("could not determine an IPv4 address reachable from the Android device".into()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,19 +43,6 @@ mod tests {
             }
             Err(message) => {
                 assert!(message.contains("Platform Tools"), "got: {message}");
-            }
-        }
-    }
-
-    #[test]
-    fn lan_ipv4_returns_a_non_loopback_v4_address_when_online() {
-        match lan_ipv4() {
-            Ok(address) => {
-                assert!(address.parse::<std::net::Ipv4Addr>().is_ok());
-                assert!(!address.starts_with("127."));
-            }
-            Err(_) => {
-                // Offline machines legitimately cannot resolve a LAN address.
             }
         }
     }

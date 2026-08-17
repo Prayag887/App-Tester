@@ -9,9 +9,9 @@ and installer checks.
 
 | Area | Status | Release acceptance criteria |
 | --- | --- | --- |
-| HTTP(S) capture and redaction | Partial | USB and Wi-Fi devices can capture representative HTTP and HTTPS traffic; sensitive headers, query parameters, and JSON fields are redacted before persistence, display, and export. |
-| Android connection recovery | Partial | USB disconnect, Wi-Fi handoff, unavailable ADB, authorization failure, and client-isolated Wi-Fi each result in a clear recovery path without leaving a device proxy configured. |
-| Diagnostics | Partial | Logcat monitoring starts, stops, reconnects, and reports actionable incidents for the selected app without collecting unrelated app data. |
+| HTTP(S) capture and redaction | Partial | A physical USB device can capture representative HTTP and HTTPS traffic; sensitive headers, query parameters, and JSON fields are redacted before persistence, display, and export. |
+| USB lifecycle | Partial | USB authorization failure, unplugging, unavailable ADB, and a stopped Companion result in a clear stop-and-start-new-capture path. Wireless and automatic reconnect paths are intentionally unsupported. |
+| Diagnostics | Partial | Logcat monitoring starts and stops with one explicit USB capture and reports actionable incidents for the selected app without collecting unrelated app data. |
 | Comparison workflows | Partial | Users can select, pin, edit, and delete baselines; schema differences have clear, testable semantics. |
 | Data portability | Partial | Redacted metadata export/import is implemented. Verify export and import on each supported desktop installer and add user-directed destination selection before release. |
 | Protocol coverage | Missing | WebSocket behavior, HTTP/2 concurrency, certificate pinning limitations, and HTTP/3 bypasses are either supported and tested or explicitly surfaced before capture starts. |
@@ -30,32 +30,20 @@ and installer checks.
 
 | Area | Status | Release acceptance criteria |
 | --- | --- | --- |
-| Automated checks | Partial | The exact release commit passes Rust, desktop, and companion checks on CI. |
-| Installers | Partial | Signed, versioned installers are built and smoke-tested on supported macOS architectures, Windows, and Linux. |
+| Local automated checks | Partial | The release workspace passes `pnpm qa:production`, including Rust, desktop, and Companion checks and local builds. |
+| Installers | Partial | Signed, versioned installers are built and smoke-tested on supported Windows and Linux versions. |
 | Update and rollback | Partial | Signed Windows NSIS and Linux AppImage updates are implemented through GitHub Releases. Demonstrate upgrade and failed-update recovery on both platforms, then document rollback steps and support windows. |
 | Release notes | Partial | Every release states user-visible changes, migration notes, known limitations, and security-impacting changes. |
 
 ## Current evidence
 
-The following checks were completed locally on 2026-07-30 for commit
-`4328f16` before its documentation update:
+The following historical checks were completed locally on 2026-07-30:
 
-- Android 17 emulator (`emulator-5554`) discovery, capture startup, fallback
-  from an occupied local proxy port, scoped HTTP(S) capture, comparison output,
-  Logcat incident reporting, and proxy cleanup were exercised. Cleanup was
-  confirmed by checking that the Android global proxy returned to `:0`.
-- The rebuilt Companion was installed on that emulator. It opens to an
-  explicit **Scan connection code** action without requesting camera access on
-  launch. Flutter analysis and its test suite passed with Flutter 3.44.7.
-- The macOS ARM64 DMG was built, checksum-verified when mounted, launched from
-  the mounted image, quit cleanly, and ejected.
-- `pnpm qa:production` passed locally: formatting, clippy, Rust tests, desktop
-  tests/type-check/build, Companion analysis/tests, and debug APK build.
+- `pnpm qa:production` passed locally at the time. That evidence predates the
+  USB-only scope and must not be treated as current USB-device validation.
 
-This evidence reduces the outstanding device and installer work but does not
-change any status to **Implemented**: CI must pass for the exact pushed commit,
-Windows/Linux and macOS Intel installers still require native smoke tests, and
-the remaining checklist acceptance criteria must be demonstrated.
+Windows and Linux installers still require native smoke tests, and the current
+USB-only workflow must be demonstrated on a physical device before launch.
 
 ## Open-source project health
 

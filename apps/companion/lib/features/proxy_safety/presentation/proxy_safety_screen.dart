@@ -13,35 +13,10 @@ class ProxySafetyScreen extends StatefulWidget {
 }
 
 class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
-  final _host = TextEditingController(text: '127.0.0.1');
-  final _port = TextEditingController(text: '8080');
-  final _package = TextEditingController();
-  String? _loadedEndpoint;
-
-  @override
-  void dispose() {
-    _host.dispose();
-    _port.dispose();
-    _package.dispose();
-    super.dispose();
-  }
-
-  void _restoreSavedSettings() {
-    final status = widget.viewModel.status;
-    if (status == null) return;
-    final endpoint = '${status.host}:${status.port}:${status.targetPackage}';
-    if (_loadedEndpoint == endpoint) return;
-    _loadedEndpoint = endpoint;
-    _host.text = status.host ?? _host.text;
-    _port.text = status.port?.toString() ?? _port.text;
-    _package.text = status.targetPackage ?? _package.text;
-  }
-
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: widget.viewModel,
         builder: (context, _) {
-          _restoreSavedSettings();
           final model = widget.viewModel;
           final active = model.status?.isVpnActive == true;
           return Scaffold(
@@ -64,7 +39,7 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
                                       style: TextStyle(
                                           fontSize: 20,
                                           fontWeight: FontWeight.w700)),
-                                  Text('Control VPN capture from this phone',
+                                  Text('USB capture status',
                                       style:
                                           TextStyle(color: Color(0xff8ea6c9))),
                                 ]),
@@ -74,33 +49,16 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
                               active: active,
                               packageName: model.status?.targetPackage),
                           const SizedBox(height: 20),
-                          Text('VPN connection',
+                          Text('USB connection',
                               style: Theme.of(context)
                                   .textTheme
                                   .titleMedium
                                   ?.copyWith(fontWeight: FontWeight.w700)),
                           const SizedBox(height: 12),
-                          TextField(
-                              controller: _host,
-                              enabled: !active && !model.isWorking,
-                              decoration: const InputDecoration(
-                                  labelText: 'Desktop host',
-                                  hintText: '192.168.1.20')),
-                          const SizedBox(height: 12),
-                          TextField(
-                              controller: _port,
-                              enabled: !active && !model.isWorking,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                  labelText: 'Proxy port', hintText: '8080')),
-                          const SizedBox(height: 12),
-                          TextField(
-                              controller: _package,
-                              enabled: !active && !model.isWorking,
-                              autocorrect: false,
-                              decoration: const InputDecoration(
-                                  labelText: 'Target package',
-                                  hintText: 'com.example.app')),
+                          const Text(
+                              'Keep this device connected by USB. Select the app and start capture from App Tester on the desktop.',
+                              style: TextStyle(
+                                  color: Color(0xffaebfd8), height: 1.5)),
                           if (model.error != null) ...[
                             const SizedBox(height: 14),
                             Text(model.error!,
@@ -108,20 +66,7 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
                                     const TextStyle(color: Color(0xffff9bac))),
                           ],
                           const SizedBox(height: 22),
-                          if (!active)
-                            FilledButton.icon(
-                              onPressed: model.isWorking
-                                  ? null
-                                  : () => model.connectVpn(
-                                      host: _host.text,
-                                      portText: _port.text,
-                                      targetPackage: _package.text),
-                              icon: const Icon(Icons.vpn_key_rounded),
-                              label: const Text('Connect VPN'),
-                              style: FilledButton.styleFrom(
-                                  minimumSize: const Size.fromHeight(52)),
-                            )
-                          else
+                          if (active)
                             FilledButton.icon(
                               onPressed: model.isWorking
                                   ? null
@@ -132,16 +77,6 @@ class _ProxySafetyScreenState extends State<ProxySafetyScreen> {
                                   minimumSize: const Size.fromHeight(52),
                                   backgroundColor: const Color(0xff9e3d4d)),
                             ),
-                          const SizedBox(height: 10),
-                          OutlinedButton.icon(
-                            onPressed: model.isWorking
-                                ? null
-                                : () => model.disconnect(),
-                            icon: const Icon(Icons.link_off_rounded),
-                            label: const Text('Disconnect desktop'),
-                            style: OutlinedButton.styleFrom(
-                                minimumSize: const Size.fromHeight(52)),
-                          ),
                         ]),
                   ),
                 ),
@@ -183,7 +118,7 @@ class _StatusCard extends StatelessWidget {
           Text(
               active
                   ? 'Capturing traffic from ${packageName ?? 'the selected package'}.'
-                  : 'Enter the desktop connection and package details, then start VPN capture.',
+                  : 'Connect USB and start capture from the desktop app.',
               style: const TextStyle(color: Color(0xffaebfd8), height: 1.4)),
         ]),
       );

@@ -9,22 +9,6 @@ class AndroidProxySafetyRepository implements ProxySafetyRepository {
   Future<ProxySafetyStatus> status() => _invoke('status');
 
   @override
-  Future<ProxySafetyStatus> startMonitoring(
-          {required String host, required int port}) =>
-      _invoke('startMonitoring', {'host': host, 'port': port});
-
-  @override
-  Future<ProxySafetyStatus> stopMonitoring() => _invoke('stopMonitoring');
-
-  @override
-  Future<ProxySafetyStatus> startVpn(
-          {required String host,
-          required int port,
-          required String targetPackage}) =>
-      _invoke('startVpn',
-          {'host': host, 'port': port, 'targetPackage': targetPackage});
-
-  @override
   Future<ProxySafetyStatus> stopVpn() => _invoke('stopVpn');
 
   Future<ProxySafetyStatus> _invoke(String method, [Object? arguments]) async {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bodyText,
+  bodyTextPreview,
   byteSizeLabel,
   curlCommand,
   durationMs,
@@ -9,6 +10,7 @@ import {
   manualRequestFromTransaction,
   methodTone,
   prettyJson,
+  textPreview,
   timeLabel,
   transactionState,
 } from "./lib";
@@ -154,6 +156,45 @@ describe("bodyText", () => {
   });
 });
 
+describe("bounded text previews", () => {
+  it("decodes only the configured prefix of an inline body", () => {
+    const preview = bodyTextPreview(
+      { storage: "inline", bytes: [97, 98, 99, 100, 101] },
+      3,
+    );
+
+    expect(preview).toEqual({
+      text: "abc",
+      truncated: true,
+      shown: 3,
+      total: 5,
+    });
+  });
+
+  it("preserves the original size reported by truncated native storage", () => {
+    const preview = bodyTextPreview(
+      { storage: "truncated", preview: [97, 98, 99], original_size: 10_000 },
+      2,
+    );
+
+    expect(preview).toEqual({
+      text: "ab",
+      truncated: true,
+      shown: 2,
+      total: 10_000,
+    });
+  });
+
+  it("bounds generated text such as cURL commands", () => {
+    expect(textPreview("12345", 3)).toEqual({
+      text: "123",
+      truncated: true,
+      shown: 3,
+      total: 5,
+    });
+  });
+});
+
 describe("prettyJson", () => {
   it("pretty-prints valid JSON and leaves other text untouched", () => {
     expect(prettyJson('{"a":1}')).toBe('{\n  "a": 1\n}');
@@ -203,6 +244,23 @@ describe("curlCommand", () => {
       ),
     ).toBe("curl https://api.example.test");
     expect(curlCommand(undefined)).toBeUndefined();
+  });
+
+  it("redacts sensitive headers even when a legacy capture contains raw values", () => {
+    const command = curlCommand(
+      transaction({
+        curl: {
+          compact:
+            "curl -H 'Authorization: Bearer real-secret' -H 'X-Trace: public' https://api.example.test",
+          multiline: "",
+          redacted: false,
+        },
+      }),
+    );
+
+    expect(command).not.toContain("real-secret");
+    expect(command).toContain("Authorization: <redacted>");
+    expect(command).toContain("X-Trace: public");
   });
 });
 
@@ -384,7 +442,7 @@ describe("manualRequestFromTransaction", () => {
     const request = manualRequestFromTransaction(
       transaction({
         storage: "inline",
-        bytes: Array.from(new TextEncoder().encode("{\"a\":1}")),
+        bytes: Array.from(new TextEncoder().encode('{"a":1}')),
       }),
     );
     expect(request.method).toBe("POST");
@@ -397,7 +455,7 @@ describe("manualRequestFromTransaction", () => {
     expect(request.body).toEqual({
       kind: "raw",
       media_type: "application/json",
-      text: "{\"a\":1}",
+      text: '{"a":1}',
     });
     expect(request.auth).toEqual({ kind: "none" });
   });
@@ -405,10 +463,17 @@ describe("manualRequestFromTransaction", () => {
   it("leaves offloaded and empty bodies as none", () => {
     expect(
       manualRequestFromTransaction(
-        transaction({ storage: "artifact", artifact_id: "a1", preview: [], original_size: 1024 }),
+        transaction({
+          storage: "artifact",
+          artifact_id: "a1",
+          preview: [],
+          original_size: 1024,
+        }),
       ).body,
     ).toEqual({ kind: "none" });
-    expect(manualRequestFromTransaction(transaction({ storage: "empty" })).body).toEqual({
+    expect(
+      manualRequestFromTransaction(transaction({ storage: "empty" })).body,
+    ).toEqual({
       kind: "none",
     });
   });

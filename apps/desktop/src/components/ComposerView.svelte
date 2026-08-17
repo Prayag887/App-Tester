@@ -7,8 +7,15 @@
   import { onMount } from "svelte";
   import { Check, Copy, Plus, Send, TerminalSquare, Trash2 } from "lucide-svelte";
   import * as api from "../api";
-  import { byteSizeLabel, elapsedLabel, prettyJson } from "../lib";
+  import { bodyTextPreview, byteSizeLabel, elapsedLabel, prettyJson } from "../lib";
+  import {
+    beginHorizontalResize,
+    clampPanelSize,
+    readPanelSize,
+    storePanelSize,
+  } from "../panel-resize";
   import { ui } from "../stores.svelte";
+  import PanelResizeHandle from "./PanelResizeHandle.svelte";
   import type {
     AuthSpec,
     HeaderEntry,
@@ -67,6 +74,25 @@
   let responseTab = $state<"body" | "headers">("body");
   let pretty = $state(true);
   let urlInput: HTMLInputElement | undefined;
+  let composerShell: HTMLElement;
+  let composerRequestWidth = $state(readPanelSize("app-tester.composer-request-width", 700));
+
+  function resizeComposerPanels(event: PointerEvent) {
+    const bounds = composerShell.getBoundingClientRect();
+    beginHorizontalResize(
+      event,
+      clientX => clampPanelSize(clientX - bounds.left, 460, Math.max(460, bounds.width - 360)),
+      value => composerRequestWidth = value,
+      value => storePanelSize("app-tester.composer-request-width", value),
+    );
+  }
+
+  function resizeComposerPanelsWithKeyboard(event: KeyboardEvent) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    composerRequestWidth = clampPanelSize(composerRequestWidth + (event.key === "ArrowRight" ? 16 : -16), 460, 900);
+    storePanelSize("app-tester.composer-request-width", composerRequestWidth);
+  }
 
   onMount(() => {
     // A request handed over from another screen ("Send in Composer").
@@ -78,14 +104,9 @@
     urlInput?.focus();
   });
 
-  const responseText = $derived.by(() => {
-    const body = response?.body;
-    if (!body || body.storage === "empty") return "";
-    if (body.storage === "unavailable") return body.reason;
-    const bytes = body.storage === "inline" ? body.bytes : body.preview;
-    return new TextDecoder().decode(new Uint8Array(bytes));
-  });
-  const responsePretty = $derived(prettyJson(responseText));
+  const responsePreview = $derived.by(() => bodyTextPreview(response?.body));
+  const responseText = $derived(responsePreview.text);
+  const responsePretty = $derived(responsePreview.truncated ? responseText : prettyJson(responseText));
 
   function wireBody(): ManualBody {
     if (bodyKind === "form") {
@@ -315,7 +336,7 @@
   <div class="hero-host"><small>SHORTCUT</small><b>⌘ ↵ to send</b></div>
 </section>
 
-<section class:has-response={Boolean(response) || Boolean(error) || busy} class="composer">
+<section class:has-response={Boolean(response) || Boolean(error) || busy} class="composer" bind:this={composerShell} style:--composer-request-width={`${composerRequestWidth}px`}>
   <div class="composer-request">
     <div class="composer-bar">
       <select
@@ -540,6 +561,13 @@
     </div>
   </div>
 
+  <PanelResizeHandle
+    label="Resize request and response panels"
+    hidden={!response && !error && !busy}
+    onpointerdown={resizeComposerPanels}
+    onkeydown={resizeComposerPanelsWithKeyboard}
+  />
+
   <div class:response-empty={!response && !error && !busy} class="composer-response">
     {#if busy && !response}
       <div class="empty"><span class="spinner"></span><strong>Sending…</strong></div>
@@ -572,6 +600,11 @@
         <div class="composer-body">
           {#if responseText}
             <pre>{pretty ? responsePretty : responseText}</pre>
+            {#if responsePreview.truncated}
+              <div class="content-truncated">
+                Showing {byteSizeLabel(responsePreview.shown)} of {byteSizeLabel(responsePreview.total)}. The full body remains in the capture.
+              </div>
+            {/if}
           {:else}
             <div class="empty compact"><strong>No body</strong></div>
           {/if}
@@ -580,7 +613,7 @@
         <div class="panel">
           {#if response.headers.length}
             <div class="headers">
-              {#each response.headers as header (`${header.name}:${header.value}`)}
+              {#each response.headers as header, index (`${index}:${header.name}:${header.value}`)}
                 <div><b>{header.name}</b><span>{header.value}</span></div>
               {/each}
             </div>

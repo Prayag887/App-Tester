@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ComposerView from "./ComposerView.svelte";
 import * as api from "../api";
 import { ui } from "../stores.svelte";
+import { UI_TEXT_PREVIEW_LIMIT } from "../lib";
 import type { SendResult } from "../types";
 
 vi.mock("../api", () => ({
@@ -115,5 +122,50 @@ describe("ComposerView", () => {
     expect(screen.queryByText("History")).toBeNull();
     expect(screen.queryByLabelText("Manage environments")).toBeNull();
     expect(screen.queryByLabelText("Save request")).toBeNull();
+  });
+
+  it("renders duplicate error-response headers without crashing", async () => {
+    const user = userEvent.setup();
+    mockedApi.sendRequest.mockResolvedValue({
+      ...sendResult,
+      status: 400,
+      reason: "Bad Request",
+      headers: [
+        { name: "X-Duplicate", value: "same" },
+        { name: "X-Duplicate", value: "same" },
+      ],
+    });
+    render(ComposerView);
+    await user.type(urlInput(), "https://api.test/bad-request");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await user.click(
+      within(
+        await screen.findByRole("navigation", { name: "Response sections" }),
+      ).getByRole("button", { name: "Headers" }),
+    );
+
+    expect(screen.getAllByText("same")).toHaveLength(2);
+  });
+
+  it("bounds a large response body before rendering it", async () => {
+    const user = userEvent.setup();
+    const bytes = Array.from(
+      new TextEncoder().encode("x".repeat(UI_TEXT_PREVIEW_LIMIT + 4_096)),
+    );
+    mockedApi.sendRequest.mockResolvedValue({
+      ...sendResult,
+      status: 400,
+      reason: "Bad Request",
+      total_bytes: bytes.length,
+      body: { storage: "inline", bytes },
+    });
+    const { container } = render(ComposerView);
+    await user.type(urlInput(), "https://api.test/large-error");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await screen.findByText(/The full body remains in the capture/);
+    expect(
+      container.querySelector(".composer-body pre")?.textContent,
+    ).toHaveLength(UI_TEXT_PREVIEW_LIMIT);
   });
 });

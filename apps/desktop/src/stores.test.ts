@@ -5,6 +5,7 @@ vi.mock("./api", async (importOriginal) => {
   return {
     ...actual,
     deleteAllTransactions: vi.fn().mockResolvedValue(undefined),
+    getTransaction: vi.fn(),
   };
 });
 import * as api from "./api";
@@ -22,6 +23,7 @@ import {
   getVisibleTransactions,
   reconcileTransactions,
   requestDeleteAll,
+  selectTransaction,
   setMirrorOpen,
   ui,
   upsertIncident,
@@ -82,6 +84,9 @@ const incident = (signature: string, message: string): LogIncident =>
 
 const reset = () => {
   ui.transactions = [];
+  ui.transactionDetail = null;
+  ui.detailLoading = false;
+  ui.tab = "Request";
   ui.incidents = [];
   ui.query = "";
   ui.changedOnly = false;
@@ -117,6 +122,16 @@ describe("upsertTransaction", () => {
     );
     expect(ui.transactions.map((tx) => tx.id)).toEqual(["a", "b"]);
     expect(ui.transactions[0].created_at).toBe("2026-07-24T00:00:03Z");
+  });
+
+  it("keeps a hard upper bound for long capture sessions", () => {
+    for (let index = 0; index < 300; index += 1) {
+      upsertTransaction(transaction({ id: String(index) }));
+    }
+
+    expect(ui.transactions).toHaveLength(250);
+    expect(ui.transactions[0].id).toBe("299");
+    expect(ui.transactions.at(-1)?.id).toBe("50");
   });
 });
 
@@ -292,6 +307,49 @@ describe("getSelectedTransaction", () => {
     expect(getSelectedTransaction()?.id).toBe("first");
     ui.selectedId = "missing";
     expect(getSelectedTransaction()?.id).toBe("first");
+  });
+
+  it("loads body detail only for the explicitly selected row", async () => {
+    const summary = transaction({
+      id: "selected",
+      response: {
+        ...transaction().response!,
+        body: { storage: "truncated", preview: [], original_size: 100_000 },
+      },
+    });
+    const detail = transaction({
+      id: "selected",
+      response: {
+        ...transaction().response!,
+        body: {
+          storage: "truncated",
+          preview: [1, 2, 3],
+          original_size: 100_000,
+        },
+      },
+    });
+    ui.transactions = [summary];
+    vi.mocked(api.getTransaction).mockResolvedValue(detail);
+
+    await selectTransaction("selected");
+
+    expect(api.getTransaction).toHaveBeenCalledWith("selected");
+    expect(getSelectedTransaction()?.response?.body).toEqual(
+      detail.response?.body,
+    );
+  });
+
+  it("preserves the active inspector tab when another request is selected", async () => {
+    ui.transactions = [transaction({ id: "selected" })];
+    ui.tab = "Timeline";
+    vi.mocked(api.getTransaction).mockResolvedValue(
+      transaction({ id: "selected" }),
+    );
+
+    await selectTransaction("selected");
+
+    expect(ui.tab).toBe("Timeline");
+    expect(ui.detailLoading).toBe(false);
   });
 });
 
