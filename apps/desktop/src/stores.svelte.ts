@@ -22,43 +22,51 @@ import type {
   AndroidDevice,
   HttpTransaction,
   LogIncident,
+  ManualRequest,
   ProxyStatus,
 } from "./types";
 
-export const ui = $state({
-  screen: "traffic" as Screen,
-  tab: "Overview" as Tab,
+class UiState {
+  screen = $state<Screen>("traffic");
+  tab = $state<Tab>("Request");
   // A request handed to the composer from another screen (e.g. "Send in
   // Composer" on a captured transaction); consumed on composer mount.
-  composerDraft: null as ManualRequest | null,
-  proxy: "stopped" as ProxyStatus,
-  devices: [] as AndroidDevice[],
-  device: "",
-  apps: [] as AndroidApp[],
-  packageName: "",
-  packageSearch: "",
-  packagePickerOpen: false,
-  devicesOpen: false,
-  transactions: [] as HttpTransaction[],
-  selectedId: "",
-  incidents: [] as LogIncident[],
-  query: "",
-  changedOnly: false,
-  errorsOnly: false,
-  capturing: false,
-  paused: false,
-  busy: false,
-  notice: "",
-  desktopHost: "Resolving…",
-  activeSessionId: undefined as string | undefined,
-  expandedIssue: "",
-  mirrorOpen: false,
-  mirrorData: "",
-  mirrorError: "",
-  confirmDeleteAll: false,
-});
+  composerDraft = $state<ManualRequest | null>(null);
+  proxy = $state<ProxyStatus>("stopped");
+  devices = $state.raw<AndroidDevice[]>([]);
+  device = $state("");
+  apps = $state.raw<AndroidApp[]>([]);
+  packageName = $state("");
+  packageSearch = $state("");
+  packagePickerOpen = $state(false);
+  devicesOpen = $state(false);
+  // Native payloads are immutable snapshots. Raw state avoids recursively
+  // proxying hundreds of headers, differences, and body-preview bytes.
+  transactions = $state.raw<HttpTransaction[]>([]);
+  transactionDetail = $state.raw<HttpTransaction | null>(null);
+  detailLoading = $state(false);
+  selectedId = $state("");
+  incidents = $state.raw<LogIncident[]>([]);
+  query = $state("");
+  changedOnly = $state(false);
+  errorsOnly = $state(false);
+  capturing = $state(false);
+  busy = $state(false);
+  notice = $state("");
+  desktopHost = $state("ADB reverse · USB");
+  activeSessionId = $state<string | undefined>(undefined);
+  expandedIssue = $state("");
+  mirrorOpen = $state(false);
+  mirrorData = $state("");
+  mirrorError = $state("");
+  confirmDeleteAll = $state(false);
+}
+
+export const ui = new UiState();
 
 let transactionRefreshInFlight = false;
+let detailRequest = 0;
+export const UI_TRANSACTION_LIMIT = 250;
 
 export function getCapturedTransactions() {
   return ui.transactions.filter(
@@ -82,10 +90,29 @@ export function getVisibleTransactions() {
 }
 
 export function getSelectedTransaction() {
-  return (
+  const summary =
     getCapturedTransactions().find((tx) => tx.id === ui.selectedId) ??
-    getVisibleTransactions()[0]
-  );
+    getVisibleTransactions()[0];
+  return ui.transactionDetail?.id === summary?.id
+    ? ui.transactionDetail
+    : summary;
+}
+
+export async function selectTransaction(id: string) {
+  ui.selectedId = id;
+  ui.transactionDetail = null;
+  ui.detailLoading = true;
+  const request = ++detailRequest;
+  try {
+    const detail = await api.getTransaction(id);
+    if (request === detailRequest && ui.selectedId === id) {
+      ui.transactionDetail = detail;
+    }
+  } catch {
+    // The metadata row remains usable if the detail read fails.
+  } finally {
+    if (request === detailRequest) ui.detailLoading = false;
+  }
 }
 
 /// Memoized per-row classification so the request list never recomputes
@@ -151,7 +178,6 @@ export function chooseDevice(serial: string) {
   ui.device = serial;
   closePickers();
   void loadApps();
-  void resolveHost();
 }
 
 export function choosePackage(name: string) {
@@ -177,12 +203,12 @@ export function copySelectedCurl() {
 
 export function upsertTransaction(transaction: HttpTransaction) {
   // The native proxy is the authority for the active capture. The WebView's
-  // cached session can lag after a reconnect or restore; dropping its event
+  // cached session can lag after a WebView restore; dropping its event
   // leaves a database row invisible until some unrelated UI refresh.
   ui.transactions = [
     transaction,
     ...ui.transactions.filter((item) => item.id !== transaction.id),
-  ];
+  ].slice(0, UI_TRANSACTION_LIMIT);
 }
 
 export function upsertIncident(issue: LogIncident) {
@@ -205,9 +231,9 @@ export function reconcileTransactions(fresh: HttpTransaction[]) {
   // not let an empty/stale read erase a transaction that has just arrived.
   const byId = new Map(ui.transactions.map((item) => [item.id, item]));
   fresh.forEach((item) => byId.set(item.id, item));
-  ui.transactions = [...byId.values()].sort((left, right) =>
-    right.created_at.localeCompare(left.created_at),
-  );
+  ui.transactions = [...byId.values()]
+    .sort((left, right) => right.created_at.localeCompare(left.created_at))
+    .slice(0, UI_TRANSACTION_LIMIT);
 }
 
 export async function refreshTransactions() {
@@ -227,13 +253,12 @@ export async function refreshProxyStatus() {
     const next = await api.getProxyStatus();
     if (ui.capturing && ui.proxy === "running" && next !== "running") {
       ui.capturing = false;
-      ui.paused = false;
       ui.notice =
-        "Capture proxy stopped unexpectedly. Reopen the companion to start a fresh capture.";
+        "USB capture stopped. Keep the device connected and start a fresh capture.";
     }
     ui.proxy = next;
   } catch {
-    // Keep the last known state while the native bridge reconnects.
+    // Keep the last known state while the native bridge is unavailable.
   }
 }
 
@@ -245,20 +270,13 @@ export async function refreshDevices() {
         item.serial === ui.device && item.authorization_status === "authorized",
     )
       ? ui.device
-      : (ui.devices.find(
-          (item) =>
-            item.connection_type === "usb" &&
-            item.authorization_status === "authorized",
-        )?.serial ??
-        ui.devices.find((item) => item.authorization_status === "authorized")
-          ?.serial ??
-        "");
+      : (ui.devices.find((item) => item.authorization_status === "authorized")
+          ?.serial ?? "");
     if (nextDevice !== ui.device) {
       ui.device = nextDevice;
       // A USB device is normally selected automatically, so load its
       // apps here rather than waiting for a second click.
       void loadApps();
-      void resolveHost();
     }
   } catch (error) {
     ui.notice = `Could not refresh Android devices: ${String(error)}`;
@@ -274,7 +292,7 @@ export async function loadApps() {
   try {
     ui.apps = await api.listInstalledApps(ui.device);
     // Package discovery can briefly return an incomplete list while ADB is
-    // reconnecting. Never clear the target from a live capture because the
+    // busy. Never clear the target from a live capture because the
     // capture session remains scoped to that package.
     if (
       ui.packageName &&
@@ -288,66 +306,15 @@ export async function loadApps() {
   }
 }
 
-export async function resolveHost() {
-  try {
-    ui.desktopHost = await api.getProxyHost(
-      getSelectedDevice()?.connection_type ?? "usb",
-    );
-  } catch {
-    ui.desktopHost = "Unavailable";
-  }
-}
-
 export async function start() {
-  if (getSelectedDevice()?.connection_type === "usb") {
-    await connectCompanion();
-    return;
-  }
-  if (!ui.packageName) {
-    ui.notice = "Choose a package before starting capture.";
-    ui.packagePickerOpen = true;
-    return;
-  }
-  ui.busy = true;
-  try {
-    const current = getSelectedDevice();
-    if (!current) throw new Error("Choose an authorized Android device first.");
-    if (current.connection_type !== "emulator") {
-      await connectCompanion();
-      return;
-    }
-    ui.activeSessionId = await api.startProxy();
-    const host = await api.getProxyHost(current.connection_type);
-    ui.desktopHost = host;
-    if (current.connection_type === "emulator") {
-      const config = await api.getProxyConfiguration();
-      await api.configureAndroidProxy(ui.device, host, config.port);
-    }
-    await api
-      .startLogcatCapture(ui.device, ui.packageName)
-      .catch(() => undefined);
-    ui.transactions = [];
-    ui.incidents = [];
-    ui.selectedId = "";
-    ui.capturing = true;
-    ui.paused = false;
-    ui.notice = `Capture active for ${ui.packageName}. Navigate the app to see traffic.`;
-  } catch (error) {
-    await api.stopProxy().catch(() => undefined);
-    ui.notice = String(error);
-  } finally {
-    ui.busy = false;
-  }
+  await connectCompanion();
 }
 
 export async function stop() {
   ui.busy = true;
   try {
-    if (ui.device && getSelectedDevice()?.connection_type === "emulator")
-      await api.clearAndroidProxy(ui.device);
     await api.stopProxy();
     ui.capturing = false;
-    ui.paused = false;
     ui.notice = "Capture stopped.";
   } catch (error) {
     ui.notice = `Could not stop capture: ${String(error)}`;
@@ -360,10 +327,9 @@ export async function connectCompanion() {
   ui.busy = true;
   try {
     const current = getSelectedDevice();
-    if (!current) throw new Error("Choose an authorized Android device first.");
-    if (current.connection_type !== "usb")
+    if (!current)
       throw new Error(
-        "Companion capture requires a USB-connected Android device.",
+        "Connect and authorize an Android device over USB first.",
       );
     if (!ui.packageName)
       throw new Error(
@@ -373,11 +339,14 @@ export async function connectCompanion() {
     ui.activeSessionId = connection.session_id;
     ui.capturing = true;
     ui.transactions = [];
+    ui.transactionDetail = null;
+    ui.incidents = [];
+    ui.selectedId = "";
     await refreshTransactions();
     await api
       .startLogcatCapture(ui.device, ui.packageName)
       .catch(() => undefined);
-    ui.notice = `Desktop capture endpoint is ready on port ${connection.port}. On your phone, stop and reconnect VPN once to apply this endpoint.`;
+    ui.notice = `USB capture active for ${ui.packageName}. Keep the cable connected and use the app normally.`;
   } catch (error) {
     ui.notice = `Could not open companion: ${String(error)}`;
   } finally {
@@ -422,6 +391,7 @@ async function performDeleteAll() {
   try {
     await api.deleteAllTransactions();
     ui.transactions = [];
+    ui.transactionDetail = null;
     ui.incidents = [];
     ui.selectedId = "";
     ui.notice = "Deleted all captured traffic and diagnostics.";
@@ -438,6 +408,7 @@ export async function importCapture(event: Event) {
   try {
     await api.importCapture(await file.text());
     ui.transactions = await api.listTransactions();
+    ui.transactionDetail = null;
     ui.notice = "Imported redacted capture.";
   } catch (error) {
     ui.notice = String(error);

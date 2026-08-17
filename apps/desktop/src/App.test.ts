@@ -14,4 +14,15 @@ describe("desktop capture pagination", () => {
     const result = await collectTransactionPages(async () => pages[request++] ?? [], 2);
     expect(result.map(item => item.id)).toEqual(["first", "second", "third"]);
   });
+
+  it("stops at the configured transaction budget", async () => {
+    const transaction = (id: string) => ({ id }) as HttpTransaction;
+    const fetchPage = async (limit: number, offset: number) =>
+      Array.from({ length: limit }, (_, index) => transaction(String(offset + index)));
+
+    const result = await collectTransactionPages(fetchPage, 100, 250);
+
+    expect(result).toHaveLength(250);
+    expect(result.at(-1)?.id).toBe("249");
+  });
 });

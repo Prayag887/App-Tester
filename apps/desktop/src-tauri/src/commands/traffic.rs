@@ -25,10 +25,14 @@ pub fn list_transactions(
             None => return Ok(vec![]),
         },
     };
-    state
+    let mut transactions = state
         .database
         .list_transactions(session_id, limit.unwrap_or(250), offset.unwrap_or(0))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    transactions
+        .iter_mut()
+        .for_each(crate::ui_payload::cap_transaction_summary);
+    Ok(transactions)
 }
 
 #[tauri::command]
@@ -44,10 +48,14 @@ pub fn get_transaction(
     state: State<'_, InspectorState>,
     id: Uuid,
 ) -> Result<Option<HttpTransaction>, String> {
-    state
+    let mut transaction = state
         .database
         .get_transaction(id)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if let Some(transaction) = transaction.as_mut() {
+        crate::ui_payload::cap_transaction_detail(transaction);
+    }
+    Ok(transaction)
 }
 
 #[tauri::command]

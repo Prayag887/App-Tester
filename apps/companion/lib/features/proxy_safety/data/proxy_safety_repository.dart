@@ -44,10 +44,5 @@ class CompanionLogEntry {
 
 abstract interface class ProxySafetyRepository {
   Future<ProxySafetyStatus> status();
-  Future<ProxySafetyStatus> startMonitoring(
-      {required String host, required int port});
-  Future<ProxySafetyStatus> stopMonitoring();
-  Future<ProxySafetyStatus> startVpn(
-      {required String host, required int port, required String targetPackage});
   Future<ProxySafetyStatus> stopVpn();
 }

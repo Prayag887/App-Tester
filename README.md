@@ -9,18 +9,18 @@ It does not tap, swipe, crawl screens, choose actions, or download AI models.
 - `crates/apiqa-core`: Android discovery, Hudsucker proxy, local CA, redaction, cURL generation, response comparison, diagnostics, correlation, SQLite, and typed events.
 - `apps/desktop/src-tauri`: application lifecycle and explicit commands.
 - `apps/desktop`: React view state and the live inspector.
-- `apps/companion`: Flutter Android companion with a per-selected-app VPN capture relay, automatic fail-open recovery, and in-app activity logs. It does not require device-owner enrollment.
+- `apps/companion`: Flutter Android companion with a USB-backed, per-selected-app VPN capture relay, automatic fail-open safety, and in-app activity logs. It does not require device-owner enrollment.
 - `apps/cli`: Rust-only device discovery utility.
 
 Core capture and analysis runs in Rust. The UI displays state, filters traffic, requests actions, and copies already-redacted values.
 
-Devices can connect through USB, an existing wireless ADB connection, or the **Connect via QR** flow. QR pairing uses Android's standard wireless-debugging payload and built-in pairing scanner on Android 11 and newer.
+App Tester supports one connection model: an authorized physical Android device connected over USB. It does not discover emulators or network ADB transports.
 
 ## Development
 
-Requirements: Rust 1.86+, pnpm, Android Platform Tools, and a connected Android device or emulator.
+Requirements: Rust 1.86+, pnpm, Android Platform Tools, and a physical Android device connected over USB.
 
-Building the desktop installer also requires Flutter because it embeds the companion APK used by the same-Wi-Fi QR install flow.
+Building the desktop installer also requires Flutter because it embeds the companion APK installed over USB when needed.
 
 ```bash
 pnpm install

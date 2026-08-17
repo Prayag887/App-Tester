@@ -1,39 +1,31 @@
 # Proxy setup
 
-1. Select an authorized Android device and application.
-2. Generate the local CA if the UI reports `certificate required`.
-3. Install the exported public certificate on the device.
-4. Review the proposed host and port, then explicitly configure the Android proxy.
-5. Start capture and navigate the app manually.
-6. Stop capture to flush state and clear proxy configuration.
+1. Connect a physical Android device by USB and approve its debugging prompt.
+2. Select that USB device and the application to test.
+3. Choose **Start USB capture**. App Tester starts its local proxy, creates an
+   `adb reverse` tunnel, installs or opens the bundled Companion, and supplies
+   the selected package directly.
+4. Approve Android's one-time VPN prompt if it appears.
+5. Navigate the target app manually.
+6. Stop capture before unplugging USB.
 
-The fastest route is **HTTPS setup**: it generates and transfers the local CA automatically, then opens Android's installer. Confirm the one Android security prompt and return to App Tester to start capture.
+For HTTPS inspection, generate and transfer the local CA, confirm Android's
+certificate installer, and ensure the target application's network-security
+policy trusts user certificates.
 
-The app never silently changes Android proxy settings. Emulator traffic normally reaches the host at `10.0.2.2`; physical devices need the host LAN address.
+The Companion VPN is restricted to the selected package. It receives no LAN
+host or wireless pairing information: the device sees a loopback endpoint and
+ADB carries the traffic over the USB cable. App Tester intentionally ignores
+emulators, wireless ADB devices, QR pairing, pairing codes, and ADB-over-TCP.
 
-If no traffic appears, do not assume no request occurred. Verify proxy configuration, certificate trust, app network-security configuration, pinning, QUIC/HTTP/3 bypass, and direct connections.
+If USB is removed, the Companion's endpoint watchdog stops its VPN and Android
+restores direct networking. App Tester does not reconnect automatically; plug
+the device in and start a new capture.
 
-## Connect through QR
+If no traffic appears, do not assume no request occurred. Verify certificate
+trust, the app's network-security configuration, certificate pinning,
+QUIC/HTTP/3 bypass, and direct socket use.
 
-Choose **Connect via QR**, then on an Android 11 or newer device:
-
-1. Enable Developer options and Wireless debugging.
-2. Open **Pair device with QR code** inside Wireless debugging.
-3. Scan the displayed code while both devices are on the same Wi-Fi network.
-
-The Rust backend generates an expiring `WIFI:T:ADB` challenge, waits for the matching `_adb-tls-pairing._tcp` mDNS service, and completes pairing with the local ADB installation. The password is short-lived and is not persisted.
-
-Use Android's Wireless debugging scanner. A normal camera or generic QR reader can decode the standard payload but cannot authorize ADB pairing by itself.
-
-## Pair with a code
-
-If Android's QR scanner stalls, choose **Pair with code** in App Tester instead. On the device, select **Pair device with pairing code** under Wireless debugging, then enter the device IP address, the temporary pairing port, and the displayed six-digit code. This uses the same secure ADB TLS pairing mechanism without the system QR scanner.
-
-## USB to Wi-Fi
-
-For a device already authorized for USB debugging, select it in App Tester and choose **USB to Wi-Fi**. You can do this while capture is active: App Tester enables legacy ADB over TCP/IP on port 5555, reconnects through the device Wi-Fi address, transfers proxy cleanup ownership to that endpoint, and restarts the app-scoped log stream. Only unplug after the confirmation says capture continues over Wi-Fi. Keep both devices on the same network. This path is for development devices you control; reconnect by USB or disable USB debugging when you no longer want the wireless endpoint available. The Android companion VPN is not required for this USB-to-Wi-Fi capture flow.
-
-If App Tester reports that the Wi-Fi ADB port is unreachable, the desktop and
-phone cannot communicate directly on that network. Leave capture on USB or
-switch both devices to a non-guest network with client/AP isolation disabled;
-the app will not claim that the handoff succeeded.
+<!-- Legacy global-proxy cleanup remains at startup only so upgrades from an
+older App Tester version cannot leave a device proxy behind. New captures do
+not change Android's global proxy setting. -->

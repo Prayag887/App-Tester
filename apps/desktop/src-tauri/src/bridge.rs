@@ -26,8 +26,9 @@ pub fn forward_events(app: &tauri::AppHandle) {
         .subscribe();
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        while let Ok(event) = receiver.recv().await {
+        while let Ok(mut event) = receiver.recv().await {
             let name = event_name(&event);
+            crate::ui_payload::cap_event(&mut event);
             let _ = handle.emit(name, event);
         }
     });

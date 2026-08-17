@@ -106,13 +106,8 @@ pub fn manage_ca_usage(
     runner: &dyn AdbRunner,
     serial: &str,
     certificate_path: &Path,
-    connection_type: &str,
     use_ca: bool,
 ) -> Result<AndroidCaChange, DeviceError> {
-    if connection_type == "emulator" {
-        runner.run(&["-s", serial, "root"])?;
-        runner.run(&["-s", serial, "wait-for-device"])?;
-    }
     let current = inspect_android_ca(runner, serial, certificate_path);
     if current.can_manage_automatically {
         let path = root_ca_path(certificate_path).map_err(DeviceError::Adb)?;
@@ -258,29 +253,10 @@ mod tests {
     }
 
     #[test]
-    fn auto_install_pushes_copies_and_reboots() {
-        let runner = ScriptedRunner::new();
-        runner.queue(Ok(String::new())); // emulator root
-        runner.queue(Ok(String::new())); // wait-for-device
-        runner.queue(Ok("installed\n".into())); // probe
-        let change =
-            manage_ca_usage(&runner, "emulator-5554", &certificate(), "emulator", true).unwrap();
-        assert!(change.rebooting);
-        assert!(!change.requires_user_confirmation);
-        assert_eq!(change.status.state, AndroidCaState::Installed);
-        let calls = runner.calls.lock().unwrap();
-        let joined = calls.join("\n");
-        assert!(joined.contains("root"), "emulator root must run first");
-        assert!(joined.contains("reboot"));
-        assert!(joined.contains("cp /data/local/tmp/app-tester-ca.pem"));
-        assert!(runner.pushes.lock().unwrap().len() == 1);
-    }
-
-    #[test]
     fn auto_remove_deletes_and_reboots_without_pushing() {
         let runner = ScriptedRunner::new();
         runner.queue(Ok("missing\n".into()));
-        let change = manage_ca_usage(&runner, "R58M123", &certificate(), "usb", false).unwrap();
+        let change = manage_ca_usage(&runner, "R58M123", &certificate(), false).unwrap();
         assert!(change.rebooting);
         assert_eq!(change.status.state, AndroidCaState::NotInstalled);
         let joined = runner.calls.lock().unwrap().join("\n");
@@ -294,7 +270,7 @@ mod tests {
         runner.queue(Err(DeviceError::Adb("su: inaccessible".into())));
         runner.queue(Ok("installing\n".into()));
         runner.queue(Ok(String::new()));
-        let change = manage_ca_usage(&runner, "R58M123", &certificate(), "usb", true).unwrap();
+        let change = manage_ca_usage(&runner, "R58M123", &certificate(), true).unwrap();
         assert!(!change.rebooting);
         assert!(change.requires_user_confirmation);
         let joined = runner.calls.lock().unwrap().join("\n");
@@ -305,7 +281,7 @@ mod tests {
     fn protected_device_removal_clears_proxy_and_opens_credentials() {
         let runner = ScriptedRunner::new();
         runner.queue(Err(DeviceError::Adb("su: inaccessible".into())));
-        let change = manage_ca_usage(&runner, "R58M123", &certificate(), "usb", false).unwrap();
+        let change = manage_ca_usage(&runner, "R58M123", &certificate(), false).unwrap();
         assert!(!change.rebooting);
         assert!(change.requires_user_confirmation);
         let joined = runner.calls.lock().unwrap().join("\n");

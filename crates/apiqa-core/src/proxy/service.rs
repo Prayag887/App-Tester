@@ -115,7 +115,7 @@ impl ProxyService {
             }
         }
         // Let the operating system select an unused port. A fixed capture port
-        // makes pairing fail on machines where another process already owns it.
+        // avoids startup failure when another process already owns a port.
         let requested_address: SocketAddr = format!("{}:0", config.bind_address).parse()?;
         let reservation = std::net::TcpListener::bind(requested_address).map_err(|error| {
             self.set_status(ProxyStatus::Failed);
@@ -155,9 +155,9 @@ impl ProxyService {
                 events.send(InspectorEvent::ProxyStatusChanged(ProxyStatus::Failed));
             }
         });
-        // `Proxy::start` binds in its background task. Do not expose a QR code
-        // until that listener is genuinely reachable; otherwise a port conflict
-        // can make the Companion register with an unrelated local process.
+        // `Proxy::start` binds in its background task. Do not open the USB
+        // Companion until that listener is genuinely reachable; otherwise a
+        // port conflict can register it with an unrelated local process.
         let readiness_address = SocketAddr::from(([127, 0, 0, 1], bind_address.port()));
         let mut ready = false;
         for _ in 0..40 {

@@ -1,9 +1,8 @@
 # Production Readiness
 
-`pnpm qa:production` is the single automated production gate. It executes the
-same checks locally and in GitHub Actions, so a green local result and CI result
-mean the tested source is buildable and passes static analysis and automated
-tests across the Rust core, desktop UI, and Android companion.
+`pnpm qa:production` is the local automated production gate. A green result
+means this workspace passes formatting, static analysis, automated tests, and
+local builds across the Rust core, desktop UI, and Android Companion.
 
 It does **not** certify a release by itself. A release owner must record the
 following manual checks in the release pull request or release notes; any
@@ -18,15 +17,16 @@ pnpm qa:production
 ```
 
 The command checks formatting and linting, Rust tests, desktop unit/type/build
-checks, and Flutter analysis/tests/release-APK build. It is intentionally
+checks, and Flutter analysis/tests/signed release-APK build. It is intentionally
 fail-fast: address the first failure and rerun the full gate.
 
 ## Manual release checklist
 
-- [ ] Test the signed desktop installers on macOS (Apple Silicon and Intel),
-  Windows, and Linux; launch, quit, and relaunch each.
-- [ ] Connect a supported USB Android device and an emulator or wireless device;
-  verify discovery, permission-denied, reconnect, empty, and error states.
+- [ ] Test the signed desktop installers on Windows and Linux; launch, quit,
+  and relaunch each.
+- [ ] Connect an authorized physical Android device over USB; verify discovery,
+  authorization-denied, unplugged, empty, and error states. Reconnect is not a
+  supported lifecycle: every new USB connection starts a new capture.
 - [ ] Exercise traffic capture, redaction, persistence/restart, comparison, and
   companion VPN fail-open recovery using non-sensitive test traffic.
 - [ ] Verify keyboard navigation, visible focus, screen-reader labels, scaling,
@@ -35,14 +35,10 @@ fail-fast: address the first failure and rerun the full gate.
   least privilege and absence of secrets or raw sensitive payloads.
 - [ ] Confirm version, changelog, release notes, artifact names, signatures,
   and rollback instructions.
-- [ ] Confirm required GitHub Actions are green for the exact merge commit.
 - [ ] Verify `latest.json` references the signed Windows NSIS and Linux
   AppImage updater artifacts, then upgrade an installation of the preceding
   version on both platforms.
 
-## CI enforcement
-
-The `Production QA` workflow runs on pull requests and pushes to `main`.
-Repository administrators must protect `main` and require its `production-qa`
-check before merging. The workflow is the automated guard; branch protection
-prevents bypassing it.
+Production readiness is decided from the local gate plus the manual USB-device
+and native-installer evidence above. Repository checks may protect code quality,
+but they are not used as production-readiness evidence.

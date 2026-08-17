@@ -5,6 +5,7 @@
   import Topbar from "./components/Topbar.svelte";
   import NoticeBar from "./components/NoticeBar.svelte";
   import UpdateBanner from "./components/UpdateBanner.svelte";
+  import PanelResizeHandle from "./components/PanelResizeHandle.svelte";
   import TrafficView from "./components/TrafficView.svelte";
   import ComposerView from "./components/ComposerView.svelte";
   import LogsView from "./components/LogsView.svelte";
@@ -18,10 +19,35 @@
     upsertTransaction,
   } from "./stores.svelte";
   import { checkForUpdates } from "./updates.svelte";
+  import {
+    beginHorizontalResize,
+    clampPanelSize,
+    readPanelSize,
+    storePanelSize,
+  } from "./panel-resize";
   const screen = $derived(ui.screen);
+  let appShell: HTMLElement;
+  let sidebarWidth = $state(readPanelSize("app-tester.sidebar-width", 238));
   import type { HttpTransaction, LogIncident, ProxyStatus } from "./types";
 
   type InspectorEvent<T> = { kind: string; payload: T };
+
+  function resizeSidebar(event: PointerEvent) {
+    const bounds = appShell.getBoundingClientRect();
+    beginHorizontalResize(
+      event,
+      clientX => clampPanelSize(clientX - bounds.left, 190, Math.min(340, bounds.width * 0.3)),
+      value => sidebarWidth = value,
+      value => storePanelSize("app-tester.sidebar-width", value),
+    );
+  }
+
+  function resizeSidebarWithKeyboard(event: KeyboardEvent) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    sidebarWidth = clampPanelSize(sidebarWidth + (event.key === "ArrowRight" ? 12 : -12), 190, 340);
+    storePanelSize("app-tester.sidebar-width", sidebarWidth);
+  }
 
   onMount(() => {
     void refreshProxyStatus();
@@ -59,8 +85,9 @@
 </script>
 
 <svelte:window onclick={closePickers} />
-<main class="svelte-app">
+<main class="svelte-app" bind:this={appShell} style:--sidebar-width={`${sidebarWidth}px`}>
   <Sidenav />
+  <PanelResizeHandle label="Resize navigation sidebar" onpointerdown={resizeSidebar} onkeydown={resizeSidebarWithKeyboard} />
   <section class:logs-mode={screen === "logs"} class="svelte-main">
     <Topbar />
     <NoticeBar />

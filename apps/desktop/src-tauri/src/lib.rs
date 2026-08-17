@@ -15,6 +15,7 @@ mod adb;
 mod bridge;
 mod commands;
 mod state;
+mod ui_payload;
 
 use std::sync::Arc;
 
@@ -59,7 +60,7 @@ pub fn run() {
                 database.clone(),
                 events.clone(),
             ));
-            let state = InspectorState::new(proxy, database, ca_directory, configured_device_path);
+            let state = InspectorState::new(proxy, database, ca_directory);
             app.manage(state);
             bridge::forward_events(app.handle());
             Ok(())
@@ -68,20 +69,7 @@ pub fn run() {
             devices::discover_devices,
             devices::list_installed_apps,
             devices::launch_installed_app,
-            devices::get_proxy_host,
-            devices::configure_android_proxy,
-            devices::clear_android_proxy,
-            devices::verify_android_proxy,
-            devices::enable_usb_wifi,
             devices::capture_screen,
-            companion::begin_qr_pairing,
-            companion::finish_qr_pairing,
-            companion::pair_with_code,
-            companion::prepare_companion_install,
-            companion::prepare_companion_connection,
-            companion::list_companion_apps,
-            companion::select_companion_package,
-            companion::start_usb_companion_capture,
             companion::open_usb_companion,
             companion::stop_usb_companion_capture,
             companion::install_companion,
@@ -121,12 +109,6 @@ pub fn run() {
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let state = app_handle.state::<InspectorState>();
-                if let Some(serial) = state.session.configured_device()
-                    && let Ok(adb) = adb::adb()
-                {
-                    let _ = android::clear_proxy(adb, &serial);
-                    let _ = std::fs::remove_file(&state.configured_device_path);
-                }
                 if let Some(serial) = state.session.take_companion_device()
                     && let Ok(adb) = adb::adb()
                 {

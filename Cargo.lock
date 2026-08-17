@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "androidqa-core"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -54,7 +54,6 @@ dependencies = [
  "http-body",
  "http-body-util",
  "hudsucker",
- "qrcode",
  "regex",
  "reqwest",
  "rusqlite",
@@ -79,7 +78,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-tester"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "androidqa-core",
  "anyhow",
@@ -88,11 +87,10 @@ dependencies = [
 
 [[package]]
 name = "app-tester-desktop"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "androidqa-core",
  "base64 0.22.1",
- "qrcode",
  "reqwest",
  "rfd",
  "serde",
@@ -3366,12 +3364,6 @@ checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
 ]
-
-[[package]]
-name = "qrcode"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-xml"

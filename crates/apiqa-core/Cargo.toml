@@ -20,7 +20,6 @@ tokio.workspace = true
 hudsucker.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
-qrcode.workspace = true
 similar.workspace = true
 dashmap.workspace = true
 anyhow.workspace = true

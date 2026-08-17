@@ -1,14 +1,12 @@
 //! Shared application state and session coordination.
 
 use std::{
-    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
 use androidqa_core::{
-    android::QrPairingSecret, diagnostics::logcat::LogcatSupervisor, persistence::Database,
-    proxy::ProxyService,
+    diagnostics::logcat::LogcatSupervisor, persistence::Database, proxy::ProxyService,
 };
 use uuid::Uuid;
 
@@ -27,7 +25,6 @@ pub struct Session {
     session_id: Mutex<Option<Uuid>>,
     logcat: Mutex<Option<LogcatSupervisor>>,
     companion_device: Mutex<Option<String>>,
-    configured_device: Mutex<Option<String>>,
 }
 
 impl Default for Session {
@@ -42,7 +39,6 @@ impl Session {
             session_id: Mutex::new(None),
             logcat: Mutex::new(None),
             companion_device: Mutex::new(None),
-            configured_device: Mutex::new(None),
         }
     }
 
@@ -71,21 +67,6 @@ impl Session {
     pub fn set_companion_device(&self, serial: String) {
         *lock(&self.companion_device) = Some(serial);
     }
-
-    pub fn configured_device(&self) -> Option<String> {
-        lock(&self.configured_device).clone()
-    }
-
-    pub fn set_configured_device(&self, serial: String) {
-        *lock(&self.configured_device) = Some(serial);
-    }
-
-    pub fn clear_configured_device(&self, serial: &str) {
-        let mut configured = lock(&self.configured_device);
-        if configured.as_deref() == Some(serial) {
-            *configured = None;
-        }
-    }
 }
 
 pub struct InspectorState {
@@ -93,25 +74,15 @@ pub struct InspectorState {
     pub database: Arc<Database>,
     pub session: Session,
     pub ca_directory: PathBuf,
-    pub configured_device_path: PathBuf,
-    /// QR pairing secrets keyed by challenge id; drained by `finish_qr_pairing`.
-    pub qr_pairings: Mutex<HashMap<Uuid, QrPairingSecret>>,
 }
 
 impl InspectorState {
-    pub fn new(
-        proxy: Arc<ProxyService>,
-        database: Arc<Database>,
-        ca_directory: PathBuf,
-        configured_device_path: PathBuf,
-    ) -> Self {
+    pub fn new(proxy: Arc<ProxyService>, database: Arc<Database>, ca_directory: PathBuf) -> Self {
         Self {
             proxy,
             database,
             session: Session::new(),
             ca_directory,
-            configured_device_path,
-            qr_pairings: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -130,19 +101,10 @@ mod tests {
     }
 
     #[test]
-    fn companion_and_configured_devices_track_independently() {
+    fn companion_device_is_taken_once() {
         let session = Session::new();
         session.set_companion_device("R58M123".into());
         assert_eq!(session.take_companion_device().as_deref(), Some("R58M123"));
         assert_eq!(session.take_companion_device(), None);
-
-        session.set_configured_device("emulator-5554".into());
-        session.clear_configured_device("other-device");
-        assert_eq!(
-            session.configured_device().as_deref(),
-            Some("emulator-5554")
-        );
-        session.clear_configured_device("emulator-5554");
-        assert_eq!(session.configured_device(), None);
     }
 }

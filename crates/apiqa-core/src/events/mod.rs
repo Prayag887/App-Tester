@@ -50,11 +50,11 @@ mod tests {
         let broadcaster = EventBroadcaster::default();
         let mut first = broadcaster.subscribe();
         let mut second = broadcaster.subscribe();
-        broadcaster.send(InspectorEvent::DeviceStatusChanged("emulator-5554".into()));
+        broadcaster.send(InspectorEvent::DeviceStatusChanged("usb-serial".into()));
         broadcaster.send(InspectorEvent::DeviceStatusChanged("R58M123".into()));
         assert!(matches!(
             first.try_recv().unwrap(),
-            InspectorEvent::DeviceStatusChanged(serial) if serial == "emulator-5554"
+            InspectorEvent::DeviceStatusChanged(serial) if serial == "usb-serial"
         ));
         assert!(matches!(
             first.try_recv().unwrap(),
@@ -62,7 +62,7 @@ mod tests {
         ));
         assert!(matches!(
             second.try_recv().unwrap(),
-            InspectorEvent::DeviceStatusChanged(serial) if serial == "emulator-5554"
+            InspectorEvent::DeviceStatusChanged(serial) if serial == "usb-serial"
         ));
     }
 
