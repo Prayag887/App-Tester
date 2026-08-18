@@ -14,7 +14,7 @@ blake3 = "1.8.2"
 bytes = "1.11.1"
 dashmap = "6.1.0"
 futures-util = "0.3.31"
-base64 = "0.22.1"
+base64 = "0.23.1"
 hudsucker = { version = "0.25.0", features = ["http2"] }
 http-body = "1.0.2"
 http-body-util = "0.1.3"
