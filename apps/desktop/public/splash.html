@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>App Tester</title>
+    <script src="/startup-theme.js"></script>
+    <style>
+      :root { color-scheme: dark; }
+      :root[data-theme="catppuccin-latte"], :root[data-theme="nord-light"],
+      :root[data-theme="gruvbox-light"], :root[data-theme="tokyo-day"],
+      :root[data-theme="rose-pine-dawn"], :root[data-theme="solarized-light"],
+      :root[data-theme="github-light"] { color-scheme: light; }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body {
+        display: grid;
+        place-items: center;
+        color: var(--splash-text);
+        background:
+          radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--splash-accent) 15%, transparent) 0, transparent 31%),
+          var(--splash-bg);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .ambient {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: min(52vw, 620px);
+        aspect-ratio: 1;
+        border: 1px solid color-mix(in srgb, var(--splash-accent) 12%, transparent);
+        border-radius: 42% 58% 55% 45% / 49% 42% 58% 51%;
+        opacity: .72;
+        animation: ambient-turn 8s linear infinite;
+      }
+      .splash {
+        position: relative;
+        display: grid;
+        justify-items: center;
+        transform: translateY(-2%);
+      }
+      .logo-wrap {
+        position: relative;
+        display: grid;
+        width: 128px;
+        height: 128px;
+        place-items: center;
+        border: 1px solid color-mix(in srgb, var(--splash-accent) 28%, transparent);
+        border-radius: 34px;
+        background: color-mix(in srgb, var(--splash-accent) 7%, var(--splash-bg));
+        box-shadow: 0 28px 80px color-mix(in srgb, var(--splash-accent) 20%, transparent);
+        animation: logo-arrive 650ms cubic-bezier(.16, 1, .3, 1) both, logo-float 3s 650ms ease-in-out infinite;
+      }
+      .logo-wrap::after {
+        position: absolute;
+        inset: -13px;
+        border: 1px solid color-mix(in srgb, var(--splash-accent) 18%, transparent);
+        border-radius: 43px;
+        content: "";
+        animation: pulse 2.4s 600ms ease-out infinite;
+      }
+      svg { width: 82px; height: 82px; overflow: visible; }
+      .phone, .focus, .check {
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .phone { stroke: var(--splash-text); stroke-width: 5; opacity: .94; }
+      .focus { stroke: #15cbea; stroke-width: 5; }
+      .check {
+        stroke: #9cff00;
+        stroke-width: 6;
+        stroke-dasharray: 1;
+        stroke-dashoffset: 1;
+        animation: draw-check 420ms 380ms cubic-bezier(.16, 1, .3, 1) forwards;
+      }
+      h1 {
+        display: flex;
+        gap: .075em;
+        margin: 30px 0 0;
+        font-size: clamp(27px, 3vw, 38px);
+        font-weight: 760;
+        letter-spacing: .16em;
+        line-height: 1;
+      }
+      h1 span {
+        opacity: 0;
+        transform: translateY(16px) scale(.9);
+        animation: letter-in 420ms cubic-bezier(.16, 1, .3, 1) forwards;
+        animation-delay: calc(420ms + var(--i) * 30ms);
+      }
+      .tagline {
+        margin: 15px 0 0;
+        color: color-mix(in srgb, var(--splash-text) 62%, transparent);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: .22em;
+        text-transform: uppercase;
+        opacity: 0;
+        animation: fade-up 500ms 820ms cubic-bezier(.16, 1, .3, 1) forwards;
+      }
+      .loader {
+        width: 160px;
+        height: 2px;
+        margin-top: 30px;
+        overflow: hidden;
+        border-radius: 99px;
+        background: color-mix(in srgb, var(--splash-text) 10%, transparent);
+        opacity: 0;
+        animation: fade-up 400ms 950ms ease forwards;
+      }
+      .loader::after {
+        display: block;
+        width: 46%;
+        height: 100%;
+        border-radius: inherit;
+        content: "";
+        background: var(--splash-accent);
+        box-shadow: 0 0 14px color-mix(in srgb, var(--splash-accent) 70%, transparent);
+        animation: loader-run 1.25s 950ms cubic-bezier(.65, 0, .35, 1) infinite;
+      }
+      @keyframes logo-arrive { from { opacity: 0; transform: scale(.72) rotate(-5deg); filter: blur(6px); } }
+      @keyframes logo-float { 50% { transform: translateY(-7px); } }
+      @keyframes pulse { 0% { opacity: 0; transform: scale(.86); } 28% { opacity: .75; } 100% { opacity: 0; transform: scale(1.14); } }
+      @keyframes ambient-turn {
+        from { transform: translate(-50%, -50%) rotate(0); }
+        to { transform: translate(-50%, -50%) rotate(360deg); }
+      }
+      @keyframes draw-check { to { stroke-dashoffset: 0; } }
+      @keyframes letter-in { to { opacity: 1; transform: none; } }
+      @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+      @keyframes loader-run { from { transform: translateX(-120%); } to { transform: translateX(340%); } }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="ambient" aria-hidden="true"></div>
+    <main class="splash" role="status" aria-label="Starting App Tester">
+      <div class="logo-wrap" aria-hidden="true">
+        <svg viewBox="0 0 96 96">
+          <path class="phone" d="M34 10h28c7 0 11 4 11 11v54c0 7-4 11-11 11H34c-7 0-11-4-11-11V21c0-7 4-11 11-11Z M42 18h12 M42 78h12" />
+          <path class="focus" d="M30 29H15v15 M66 29h15v15 M30 67H15V52 M66 67h15V52" />
+          <path class="check" pathLength="1" d="M30 49l12 12 25-28" />
+        </svg>
+      </div>
+      <h1 aria-label="App Tester">
+        <span style="--i:0">A</span><span style="--i:1">P</span><span style="--i:2">P</span>
+        <span style="--i:3">&nbsp;</span>
+        <span style="--i:4">T</span><span style="--i:5">E</span><span style="--i:6">S</span><span style="--i:7">T</span><span style="--i:8">E</span><span style="--i:9">R</span>
+      </h1>
+      <p class="tagline">Capture · Compare · Understand</p>
+      <div class="loader" aria-hidden="true"></div>
+    </main>
+  </body>
+</html>

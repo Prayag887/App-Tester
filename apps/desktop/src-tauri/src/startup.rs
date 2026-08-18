@@ -4,13 +4,58 @@
 //! configured WebView disabled until initialization completes lets the event
 //! loop paint this window before the browser engine is created.
 
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
-use tauri::{Manager, Theme, WebviewWindowBuilder, window::Color};
+use tauri::{
+    LogicalPosition, Manager, Theme, WebviewUrl, WebviewWindowBuilder,
+    webview::{PageLoadEvent, WebviewBuilder},
+    window::Color,
+};
 
 const STARTUP_WINDOW_LABEL: &str = "startup";
+const STARTUP_WEBVIEW_LABEL: &str = "startup-content";
 const MAIN_WINDOW_LABEL: &str = "main";
 const THEME_FILE_NAME: &str = "startup-theme";
+const SPLASH_SHOWCASE_TIME: Duration = Duration::from_millis(1_450);
+const SPLASH_LOAD_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Debug, Default)]
+pub(crate) struct StartupGate {
+    loaded_at: Mutex<Option<Instant>>,
+    loaded: tokio::sync::Notify,
+}
+
+impl StartupGate {
+    fn mark_loaded(&self) {
+        if let Ok(mut loaded_at) = self.loaded_at.lock()
+            && loaded_at.is_none()
+        {
+            *loaded_at = Some(Instant::now());
+            self.loaded.notify_one();
+        }
+    }
+
+    async fn wait_until_loaded(&self) -> Option<Instant> {
+        let loaded_at = self.loaded_at.lock().ok().and_then(|loaded_at| *loaded_at);
+        match loaded_at {
+            Some(loaded_at) => Some(loaded_at),
+            None => {
+                let _ = tokio::time::timeout(SPLASH_LOAD_TIMEOUT, self.loaded.notified()).await;
+                self.loaded_at.lock().ok().and_then(|loaded_at| *loaded_at)
+            }
+        }
+    }
+
+    async fn wait_for_showcase(&self) {
+        if let Some(loaded_at) = self.wait_until_loaded().await {
+            tokio::time::sleep(SPLASH_SHOWCASE_TIME.saturating_sub(loaded_at.elapsed())).await;
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct StartupPalette {
@@ -64,9 +109,18 @@ impl StartupPalette {
 
 pub fn show_native(app: &tauri::App, data_dir: &Path) -> tauri::Result<()> {
     let palette = StartupPalette::read(data_dir);
-    tauri::window::WindowBuilder::new(app, STARTUP_WINDOW_LABEL)
-        .title("App Tester · Starting…")
-        .inner_size(440.0, 230.0)
+    let startup_gate = Arc::new(StartupGate::default());
+    app.manage(startup_gate.clone());
+    let main_config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == MAIN_WINDOW_LABEL)
+        .ok_or(tauri::Error::WindowNotFound)?;
+    let startup = tauri::window::WindowBuilder::new(app, STARTUP_WINDOW_LABEL)
+        .title("App Tester")
+        .inner_size(main_config.width, main_config.height)
         .center()
         .resizable(false)
         .maximizable(false)
@@ -77,6 +131,35 @@ pub fn show_native(app: &tauri::App, data_dir: &Path) -> tauri::Result<()> {
         .theme(Some(palette.theme))
         .background_color(palette.background)
         .build()?;
+
+    // Let the event loop paint the native, theme-colored shell first. The
+    // self-contained splash document is then attached without loading Svelte
+    // or the application's JavaScript bundle.
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let size = match startup.inner_size() {
+            Ok(size) => size,
+            Err(error) => {
+                eprintln!("failed to read startup window size: {error}");
+                return;
+            }
+        };
+        let scale_factor = startup.scale_factor().unwrap_or(1.0);
+        let logical_size = size.to_logical::<f64>(scale_factor);
+        let loaded_gate = startup_gate.clone();
+        let splash =
+            WebviewBuilder::new(STARTUP_WEBVIEW_LABEL, WebviewUrl::App("splash.html".into()))
+                .background_color(palette.background)
+                .on_page_load(move |_webview, payload| {
+                    if payload.event() == PageLoadEvent::Finished {
+                        loaded_gate.mark_loaded();
+                    }
+                });
+        if let Err(error) = startup.add_child(splash, LogicalPosition::new(0.0, 0.0), logical_size)
+        {
+            eprintln!("failed to attach startup animation: {error}");
+        }
+    });
     Ok(())
 }
 
@@ -99,6 +182,12 @@ pub fn create_main_webview(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+pub async fn wait_until_splash_loaded(app: &tauri::AppHandle) {
+    if let Some(startup_gate) = app.try_state::<Arc<StartupGate>>() {
+        let _ = startup_gate.wait_until_loaded().await;
+    }
+}
+
 fn reveal_main(app: &tauri::AppHandle) -> Result<(), String> {
     let main = app
         .get_webview_window(MAIN_WINDOW_LABEL)
@@ -118,7 +207,11 @@ fn reveal_main(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn frontend_ready(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn frontend_ready(
+    app: tauri::AppHandle,
+    startup_gate: tauri::State<'_, Arc<StartupGate>>,
+) -> Result<(), String> {
+    startup_gate.wait_for_showcase().await;
     reveal_main(&app)
 }
 

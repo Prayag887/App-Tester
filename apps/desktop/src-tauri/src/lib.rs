@@ -80,20 +80,23 @@ pub fn run() {
                     Ok(InspectorState::new(proxy, database, ca_directory))
                 })();
 
-                let event_handle = handle.clone();
-                let _ = handle.run_on_main_thread(move || match initialized {
-                    Ok(state) => {
-                        event_handle.manage(state);
-                        bridge::forward_events(&event_handle);
-                        if let Err(error) = startup::create_main_webview(&event_handle) {
-                            eprintln!("failed to create App Tester window: {error}");
+                tauri::async_runtime::spawn(async move {
+                    startup::wait_until_splash_loaded(&handle).await;
+                    let event_handle = handle.clone();
+                    let _ = handle.run_on_main_thread(move || match initialized {
+                        Ok(state) => {
+                            event_handle.manage(state);
+                            bridge::forward_events(&event_handle);
+                            if let Err(error) = startup::create_main_webview(&event_handle) {
+                                eprintln!("failed to create App Tester window: {error}");
+                                event_handle.exit(1);
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("failed to initialize App Tester: {error}");
                             event_handle.exit(1);
                         }
-                    }
-                    Err(error) => {
-                        eprintln!("failed to initialize App Tester: {error}");
-                        event_handle.exit(1);
-                    }
+                    });
                 });
             });
             Ok(())
