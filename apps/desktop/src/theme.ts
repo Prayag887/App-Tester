@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+
 export const THEMES = [
   { id: "default", label: "Default" },
   { id: "catppuccin-latte", label: "Catppuccin Latte · Light" },
@@ -42,6 +44,10 @@ function ensureThemeStyles(): void {
   themeStyles ??= import("./themes.css");
 }
 
+export function waitForThemeStyles(): Promise<unknown> {
+  return themeStyles ?? Promise.resolve();
+}
+
 export function themeMode(theme: ThemeId): "light" | "dark" {
   return LIGHT_THEMES.has(theme) ? "light" : "dark";
 }
@@ -49,7 +55,10 @@ export function themeMode(theme: ThemeId): "light" | "dark" {
 function syncNativeTheme(theme: ThemeId): void {
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
   void import("@tauri-apps/api/window")
-    .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(themeMode(theme)))
+    .then(({ getCurrentWindow }) => Promise.all([
+      getCurrentWindow().setTheme(themeMode(theme)),
+      invoke("remember_startup_theme", { theme }),
+    ]))
     .catch(() => undefined);
 }
 

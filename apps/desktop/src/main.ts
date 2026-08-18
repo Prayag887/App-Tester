@@ -1,17 +1,18 @@
 import { mount } from "svelte";
+import { invoke } from "@tauri-apps/api/core";
 import App from "./App.svelte";
 import "./styles.css";
 import "./motion.css";
-import { initializeTheme } from "./theme";
+import { initializeTheme, waitForThemeStyles } from "./theme";
 
 initializeTheme();
 mount(App, { target: document.getElementById("root")! });
 
-// The dependency-free splash in index.html covers WebView/module startup.
-// Dismiss it only after Svelte has mounted and the browser has painted once.
-window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-  const splash = document.getElementById("startup-splash");
-  if (!splash) return;
-  splash.classList.add("leaving");
-  window.setTimeout(() => splash.remove(), 520);
-}));
+// Hidden WebViews may throttle requestAnimationFrame. Wait for the selected
+// palette chunk instead, then let the native compositor reveal the mounted UI.
+if ("__TAURI_INTERNALS__" in window) {
+  void waitForThemeStyles()
+    .then(() => invoke("frontend_ready"))
+    .catch(() => invoke("frontend_ready"))
+    .catch(() => undefined);
+}

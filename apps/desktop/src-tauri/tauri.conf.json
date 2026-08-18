@@ -12,6 +12,9 @@
   "app": {
     "windows": [
       {
+        "label": "main",
+        "create": false,
+        "visible": false,
         "title": "App Tester",
         "width": 1320,
         "height": 840,
