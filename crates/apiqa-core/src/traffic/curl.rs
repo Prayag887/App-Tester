@@ -119,10 +119,14 @@ fn generate_curl_with_headers(
             if body_needs_base64(request, body) {
                 args.extend(["--data-binary".into(), "@-".into()]);
                 Some(BASE64.encode(body))
-            } else {
-                let body = std::str::from_utf8(body).expect("text body was validated as UTF-8");
-                args.extend(["--data-raw".into(), shell_quote(body)]);
+            } else if let Ok(text) = std::str::from_utf8(body) {
+                args.extend(["--data-raw".into(), shell_quote(text)]);
                 None
+            } else {
+                // Stay lossless if the body classification and conversion ever
+                // disagree instead of turning an invariant drift into a panic.
+                args.extend(["--data-binary".into(), "@-".into()]);
+                Some(BASE64.encode(body))
             }
         });
     let curl_compact = args.join(" ");
