@@ -7,8 +7,6 @@
   import UpdateBanner from "./components/UpdateBanner.svelte";
   import PanelResizeHandle from "./components/PanelResizeHandle.svelte";
   import TrafficView from "./components/TrafficView.svelte";
-  import ComposerView from "./components/ComposerView.svelte";
-  import LogsView from "./components/LogsView.svelte";
   import {
     closePickers,
     refreshDevices,
@@ -51,7 +49,17 @@
 
   onMount(() => {
     void refreshProxyStatus();
-    void refreshDevices();
+    // Let the WebView paint the shell before starting a cold ADB process.
+    // Device discovery follows almost immediately without competing with
+    // first-paint style/layout work.
+    const deviceStartupTimer = window.setTimeout(
+      () => void refreshDevices(),
+      120,
+    );
+    const trafficStartupTimer = window.setTimeout(
+      () => void refreshTransactions(),
+      180,
+    );
     const updateTimer = window.setTimeout(() => void checkForUpdates(), 2500);
     // Traffic and proxy state arrive as live push events from the native
     // bridge; no polling is needed for them. Only device discovery is
@@ -60,7 +68,7 @@
     // and the focus handler below repairs any gap on return).
     const deviceTimer = window.setInterval(() => {
       if (!document.hidden) void refreshDevices();
-    }, 2000);
+    }, 5000);
     // The WebView can miss push events while suspended or restored; a single
     // reconcile on focus repairs any gap without constant polling.
     const onFocus = () => {
@@ -77,6 +85,8 @@
     ];
     return () => {
       window.clearInterval(deviceTimer);
+      window.clearTimeout(deviceStartupTimer);
+      window.clearTimeout(trafficStartupTimer);
       window.clearTimeout(updateTimer);
       window.removeEventListener("focus", onFocus);
       void Promise.all(unlisteners).then(items => items.forEach(stop => stop()));
@@ -95,9 +105,15 @@
     {#if screen === "traffic"}
       <TrafficView />
     {:else if screen === "composer"}
-      <ComposerView />
+      {#await import("./components/ComposerView.svelte") then module}
+        {@const ComposerView = module.default}
+        <ComposerView />
+      {/await}
     {:else}
-      <LogsView />
+      {#await import("./components/LogsView.svelte") then module}
+        {@const LogsView = module.default}
+        <LogsView />
+      {/await}
     {/if}
   </section>
 </main>

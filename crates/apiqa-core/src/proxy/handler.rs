@@ -352,6 +352,7 @@ impl HttpHandler for CaptureHandler {
             capture_quality: CaptureQuality::MetadataOnly,
             comparison: None,
             correlated_incidents: vec![],
+            daily_changes: None,
             created_at: now,
             updated_at: now,
         };
@@ -580,10 +581,12 @@ impl HttpHandler for CaptureHandler {
                     differences,
                 });
             }
-            let completed = transaction.clone();
+            let mut completed = transaction.clone();
             drop(transaction);
             remember_recent_endpoint(&self.recent_by_endpoint, completed.clone());
-            let _ = self.database.upsert_async(completed.clone()).await;
+            if let Ok(summary) = self.database.upsert_async(completed.clone()).await {
+                completed.daily_changes = summary;
+            }
             self.events
                 .send(InspectorEvent::TransactionCompleted(completed));
             evict_completed_transactions(&self.transactions);
@@ -755,6 +758,7 @@ mod tests {
             capture_quality: CaptureQuality::MetadataOnly,
             comparison: None,
             correlated_incidents: vec![],
+            daily_changes: None,
             created_at: OffsetDateTime::from_unix_timestamp(updated_at).unwrap(),
             updated_at: OffsetDateTime::from_unix_timestamp(updated_at).unwrap(),
         };
@@ -827,6 +831,7 @@ mod tests {
             capture_quality: CaptureQuality::MetadataOnly,
             comparison: None,
             correlated_incidents: vec![],
+            daily_changes: None,
             created_at: OffsetDateTime::from_unix_timestamp(updated_at).unwrap(),
             updated_at: OffsetDateTime::from_unix_timestamp(updated_at).unwrap(),
         }

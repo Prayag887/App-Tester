@@ -32,6 +32,7 @@ export interface HttpTransaction {
   curl?: { compact: string; multiline: string; redacted: boolean };
   capture_quality: string;
   comparison?: { baseline_transaction_id?: string; compatibility: string; differences: Difference[] };
+  daily_changes?: { count: number; last_changed_at?: string };
   correlated_incidents: string[]; created_at: string; updated_at: string;
 }
 export interface AndroidDevice {

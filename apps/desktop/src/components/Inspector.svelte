@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { ListTree, ShieldCheck } from "lucide-svelte";
+  import { ListTree, ShieldCheck, X } from "lucide-svelte";
   import {
     bodyTextPreview,
+    bodyImagePreviews,
     byteSizeLabel,
     curlCommand,
     prettyJson,
@@ -27,23 +28,22 @@
   <aside class="inspector">
     {#if selectedTransaction}
       {@const tx = selectedTransaction}
-      {#key tx.id}
-        <div class="inspector-heading">
-          <div><span>{tx.request.method}</span><b>{tx.request.host}{tx.request.path}</b></div>
-          <strong class:failed={(tx.response?.status ?? 0) >= 400}>{tx.response?.status ?? "Pending"}</strong>
-        </div>
-      {/key}
+      <div class="inspector-heading">
+        <div><span>{tx.request.method}</span><b>{tx.request.host}{tx.request.path}</b></div>
+        <strong class:failed={(tx.response?.status ?? 0) >= 400}>{tx.response?.status ?? "Pending"}</strong>
+        <button class="inspector-close icon-button" aria-label="Close request inspector" title="Close inspector" onclick={() => { ui.selectedId = ""; ui.transactionDetail = null; }}><X/></button>
+      </div>
       {#if ui.detailLoading}<div class="inspector-progress" aria-label="Loading request details"><span></span></div>{/if}
       <div class="tabs" role="tablist" aria-label="Request details">
         {#each TABS as name (name)}
           <button role="tab" aria-selected={tab === name} class:active={tab === name} onclick={() => setTab(name)}>{name}</button>
         {/each}
       </div>
-      {#key `${tx.id}:${tab}`}
       <div class:backward={tabDirection === "backward"} class="detail-panel inspector-tab-content" role="tabpanel">
         {#if tab === "Request" || tab === "Response"}
           {@const message = tab === "Request" ? tx.request : tx.response}
           {@const preview = bodyTextPreview(message?.body)}
+          {@const images = bodyImagePreviews(message?.body, message?.content_type)}
           <h3>{tab} headers</h3>
           <div class="header-list">
             {#each message?.headers || [] as header, index (`${index}:${header.name}:${header.value}`)}
@@ -51,6 +51,16 @@
             {/each}
           </div>
           <h3>Body</h3>
+          {#if images.length}
+            <div class="body-image-grid" aria-label="Image previews">
+              {#each images as image, index (`${index}:${image.name}:${image.byteLength}`)}
+                <figure class="body-image-preview">
+                  <img src={image.dataUrl} alt={`Multipart upload preview: ${image.name}`} />
+                  <figcaption><b>{image.name}</b><span>{image.mediaType} · {byteSizeLabel(image.byteLength)}</span></figcaption>
+                </figure>
+              {/each}
+            </div>
+          {/if}
           <pre>{preview.truncated ? preview.text : prettyJson(preview.text || "No body")}</pre>
           {#if preview.truncated}
             <div class="content-truncated">
@@ -58,6 +68,12 @@
             </div>
           {/if}
         {:else if tab === "Compare"}
+          {#if tx.daily_changes?.count}
+            <div class="daily-change-summary">
+              <b>Changed {tx.daily_changes.count} {tx.daily_changes.count === 1 ? "time" : "times"} today</b>
+              <span>The latest response replaced earlier snapshots while this daily history was preserved.</span>
+            </div>
+          {/if}
           <div class="compare-summary">
             <div>
               <span>JSON shape comparison</span>
@@ -102,7 +118,6 @@
           </ol>
         {/if}
       </div>
-      {/key}
     {:else}
       <div class="empty-state inspector-empty">
         <ListTree size={30} />
@@ -122,3 +137,43 @@
     </aside>
   {/snippet}
 </svelte:boundary>
+
+<style>
+  .inspector-heading b { font-size: 12px; }
+  .tabs { min-height: 44px; gap: 4px; padding: 4px 8px 0; }
+  .tabs button { min-height: 39px; padding: 9px 11px; font-size: 12.5px; font-weight: 650; line-height: 1; }
+  .tabs button::after {
+    right: 11px;
+    bottom: 0;
+    left: 11px;
+    height: 3px;
+    opacity: 0;
+    transform: scaleX(.08);
+    transform-origin: center;
+    will-change: transform,opacity;
+    transition: transform 280ms cubic-bezier(.16,1,.3,1),opacity 160ms ease,box-shadow 240ms ease;
+  }
+  .tabs button:hover::after { opacity: .58; transform: scaleX(.42); }
+  .tabs button.active::after {
+    opacity: 1;
+    transform: scaleX(1);
+    box-shadow: 0 0 8px color-mix(in srgb,var(--shell-accent) 42%,transparent);
+    animation: tab-indicator-lock 480ms linear(0,.28 15%,.76 42%,1.12 65%,.97 84%,1) both;
+  }
+  .detail-panel { padding: 14px; font-size: 12.5px; }
+  .detail-panel h3 { margin: 16px 0 8px; font-size: 11px; font-weight: 750; }
+  .detail-panel pre { font-size: 12.5px; line-height: 1.65; }
+  .header-list > div { grid-template-columns: minmax(120px,.75fr) minmax(0,1.25fr); padding: 10px 12px; font-size: 12.5px; line-height: 1.45; }
+  .header-list b { font-size: 12px; }
+  .timeline { font-size: 12.5px; line-height: 1.5; }
+  .daily-change-summary span,.compare-summary small { font-size: 12px; line-height: 1.5; }
+  .compare-summary > div > span { font-size: 11px; }
+  .compare-summary b { font-size: 13px; }
+  .difference-list article { font-size: 12.5px; line-height: 1.5; }
+  @keyframes tab-indicator-lock {
+    0% { opacity: .58; transform: scaleX(.42); box-shadow: 0 0 0 transparent; }
+    64% { opacity: 1; transform: scaleX(1.12); box-shadow: 0 0 14px color-mix(in srgb,var(--shell-accent) 58%,transparent); }
+    84% { transform: scaleX(.97); }
+    100% { opacity: 1; transform: scaleX(1); box-shadow: 0 0 8px color-mix(in srgb,var(--shell-accent) 42%,transparent); }
+  }
+</style>

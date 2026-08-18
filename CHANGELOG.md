@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.10] - 2026-08-19
+
+- Added theme-aware light and dark palettes with improved contrast, readability, and interaction states throughout the desktop UI.
+- Added elastic filter, tab, and delete-confirmation motion with consistent theme-colored indicators.
+- Added faithful multipart cURL generation, binary base64 display, and inline image previews while preserving authorization headers.
+- Added a cross-platform, theme-aware startup splash with a deterministic handoff to the main window.
+- Expanded the offline demo workflow for exploring realistic traffic and correlated logs without an Android device.
+
 ## [0.2.9] - 2026-08-17
 
 - Replaced wireless, emulator, and QR connection paths with a single physical-USB capture flow backed by ADB reverse and the per-app Companion VPN.

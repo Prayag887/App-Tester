@@ -112,6 +112,7 @@ mod tests {
             capture_quality: CaptureQuality::Complete,
             comparison: None,
             correlated_incidents: vec![],
+            daily_changes: None,
             created_at: timestamp,
             updated_at: timestamp,
         }

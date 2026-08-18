@@ -1,0 +1,229 @@
+/*
+ * Desktop motion language
+ * -----------------------
+ * Spatial motion moves or reshapes an element. Effect motion changes colour,
+ * opacity, or elevation. Keeping both vocabularies here makes interaction
+ * tuning consistent and keeps component markup free of animation mechanics.
+ */
+.svelte-app {
+  --motion-spatial-fast: 150ms;
+  --motion-spatial-default: 240ms;
+  --motion-effect-fast: 110ms;
+  --motion-effect-default: 180ms;
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-ease-spring: cubic-bezier(0.16, 1.25, 0.3, 1);
+  --motion-ease-liquid: cubic-bezier(0.18, 0.89, 0.24, 1.18);
+}
+
+/* The shell pieces settle independently after the native splash handoff. */
+.svelte-app .sidenav,
+.svelte-app .topbar,
+.svelte-app .svelte-main > .hero,
+.svelte-app .svelte-main > .toolbar,
+.svelte-app .svelte-main > .workbench,
+.svelte-app > .panel-resize-handle,
+.svelte-app .sidenav nav button,
+.svelte-app .capture-status {
+  transition:
+    opacity 380ms var(--motion-ease-standard),
+    transform 640ms var(--motion-ease-liquid),
+    border-radius 680ms var(--motion-ease-liquid),
+    background-color var(--motion-effect-fast) var(--motion-ease-standard),
+    border-color var(--motion-effect-fast) var(--motion-ease-standard);
+}
+/* Keyframes are presentation-safe: they settle without waiting on JS state. */
+.svelte-app .sidenav { animation: motion-startup-sidebar 720ms 110ms var(--motion-ease-liquid) both; }
+.svelte-app .topbar { animation: motion-startup-topbar 680ms 145ms var(--motion-ease-liquid) both; }
+.svelte-app .svelte-main > .hero { animation: motion-startup-content 680ms 210ms var(--motion-ease-liquid) both; }
+.svelte-app .svelte-main > .toolbar { animation: motion-startup-content 650ms 270ms var(--motion-ease-liquid) both; }
+.svelte-app .svelte-main > .workbench { animation: motion-startup-content 720ms 325ms var(--motion-ease-liquid) both; }
+.svelte-app .sidenav nav button:nth-child(1) { animation: motion-startup-nav 540ms 210ms var(--motion-ease-liquid) both; }
+.svelte-app .sidenav nav button:nth-child(2) { animation: motion-startup-nav 540ms 265ms var(--motion-ease-liquid) both; }
+.svelte-app .sidenav nav button:nth-child(3) { animation: motion-startup-nav 540ms 320ms var(--motion-ease-liquid) both; }
+.svelte-app .capture-status { animation: motion-startup-nav 560ms 375ms var(--motion-ease-liquid) both; }
+.svelte-app > .panel-resize-handle { animation: motion-startup-nav 560ms 180ms var(--motion-ease-liquid) both; }
+
+/* Controls use restrained lift and press feedback. */
+.svelte-app button:not(.request-row, .issue-toggle, .panel-resize-handle) {
+  transform: translate3d(0, 0, 0) scale(1);
+  transition:
+    transform var(--motion-spatial-fast) var(--motion-ease-spring),
+    border-radius var(--motion-spatial-default) var(--motion-ease-spring),
+    background-color var(--motion-effect-fast) var(--motion-ease-standard),
+    border-color var(--motion-effect-fast) var(--motion-ease-standard),
+    color var(--motion-effect-fast) var(--motion-ease-standard),
+    box-shadow var(--motion-effect-default) var(--motion-ease-standard),
+    opacity var(--motion-effect-fast) linear;
+}
+.svelte-app button:not(.request-row, .issue-toggle, .panel-resize-handle):hover:not(:disabled) {
+  transform: translate3d(0, -1px, 0) scale(1.012);
+  border-radius: 10px;
+}
+.svelte-app button:not(.request-row, .issue-toggle, .panel-resize-handle):active:not(:disabled) {
+  transform: translate3d(0, 1px, 0) scale(0.975);
+  border-radius: 7px;
+  opacity: 0.9;
+  transition-duration: 70ms;
+}
+
+/* Icon motion follows the control instead of running as a separate flourish. */
+.svelte-app button > svg {
+  transform: translate3d(0, 0, 0) scale(1);
+  transition:
+    transform var(--motion-spatial-default) var(--motion-ease-spring),
+    color var(--motion-effect-fast) var(--motion-ease-standard);
+}
+.svelte-app button:hover:not(:disabled) > svg {
+  transform: translate3d(0, -0.5px, 0) scale(1.08);
+}
+.svelte-app .icon-button:hover:not(:disabled) > svg {
+  transform: rotate(-4deg) scale(1.1);
+}
+
+/* Navigation uses a small spatial nudge and a springy active icon. */
+.sidenav nav button {
+  transform-origin: left center;
+}
+.sidenav nav button:hover:not(:disabled) {
+  transform: translate3d(3px, 0, 0) scale(1.008);
+}
+.sidenav nav button.active > svg {
+  transform: scale(1.1);
+  color: #b9a2f0;
+}
+.sidenav nav button i {
+  transform: scale(1);
+  transition: transform var(--motion-spatial-default) var(--motion-ease-spring);
+}
+.sidenav nav button:hover i {
+  transform: scale(1.12);
+}
+
+/* Dropdown trigger chevrons track the menu state. */
+.svelte-app .select-trigger > svg:last-child {
+  transform: rotate(0deg);
+  transition: transform var(--motion-spatial-default) var(--motion-ease-spring);
+}
+.svelte-app .select-trigger:hover > svg:last-child {
+  transform: rotate(0deg) scale(1.05);
+}
+.svelte-app .select-trigger.open > svg:last-child,
+.svelte-app .select-trigger.open:hover > svg:last-child {
+  transform: rotate(180deg);
+}
+.select-trigger.open {
+  border-color: #8068b6;
+  background: #27334d;
+  box-shadow: 0 0 0 3px #8068b61f;
+}
+
+/* Popovers arrive as one surface, then their contents settle in sequence. */
+.menu {
+  transform-origin: top right;
+  will-change: transform, opacity;
+}
+.menu > button,
+.menu > .menu-empty,
+.menu > .package-filter {
+  animation: motion-popover-item-in var(--motion-spatial-default)
+    var(--motion-ease-emphasized) backwards;
+}
+.menu > :nth-child(2) { animation-delay: 18ms; }
+.menu > :nth-child(3) { animation-delay: 30ms; }
+.menu > :nth-child(4) { animation-delay: 42ms; }
+.menu > :nth-child(5) { animation-delay: 54ms; }
+.menu > :nth-child(n + 6) { animation-delay: 66ms; }
+.menu button {
+  transition:
+    transform var(--motion-spatial-fast) var(--motion-ease-spring),
+    background-color var(--motion-effect-fast) var(--motion-ease-standard),
+    color var(--motion-effect-fast) var(--motion-ease-standard);
+}
+.menu button:hover,
+.menu button.selected {
+  transform: translate3d(3px, 0, 0);
+}
+
+/* Dense rows stay grounded while still acknowledging hover and selection. */
+.request-row {
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform var(--motion-spatial-fast) var(--motion-ease-spring),
+    background-color var(--motion-effect-fast) var(--motion-ease-standard),
+    box-shadow var(--motion-effect-fast) var(--motion-ease-standard);
+}
+.request-row:hover {
+  transform: translate3d(3px, 0, 0);
+}
+.request-row:active {
+  transform: translate3d(1px, 0, 0) scale(0.995);
+}
+
+/* Tabs morph their underline instead of moving the whole label. */
+.tabs button::after {
+  transition: transform var(--motion-spatial-default) var(--motion-ease-spring);
+}
+.tabs button:hover::after {
+  transform: scaleX(0.4);
+}
+.tabs button.active::after {
+  transform: scaleX(1);
+}
+
+.issue-card {
+  transition:
+    transform var(--motion-spatial-default) var(--motion-ease-spring),
+    border-color var(--motion-effect-default) var(--motion-ease-standard),
+    box-shadow var(--motion-effect-default) var(--motion-ease-standard);
+}
+.issue-card:hover {
+  transform: translate3d(0, -2px, 0);
+}
+
+input,
+textarea,
+select {
+  transition:
+    border-color var(--motion-effect-fast) var(--motion-ease-standard),
+    background-color var(--motion-effect-fast) var(--motion-ease-standard),
+    box-shadow var(--motion-effect-default) var(--motion-ease-standard);
+}
+
+@keyframes motion-startup-sidebar {
+  from { opacity: 0; transform: translate3d(-22px, 0, 0) scale(0.96); border-radius: 0 24px 24px 0; }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); border-radius: 0; }
+}
+@keyframes motion-startup-topbar {
+  from { opacity: 0; transform: translate3d(0, -16px, 0) scaleX(0.98); border-radius: 0 0 20px 20px; }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scaleX(1); border-radius: 0; }
+}
+@keyframes motion-startup-content {
+  from { opacity: 0; transform: translate3d(0, 24px, 0) scale(0.96, 0.9); border-radius: 36px 22px 34px 24px; }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); border-radius: 0; }
+}
+@keyframes motion-startup-nav {
+  from { opacity: 0; transform: translate3d(-14px, 5px, 0) scale(0.9); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes motion-popover-item-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -4px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .svelte-app *,
+  .svelte-app *::before,
+  .svelte-app *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

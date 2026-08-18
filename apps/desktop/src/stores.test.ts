@@ -5,6 +5,8 @@ vi.mock("./api", async (importOriginal) => {
   return {
     ...actual,
     deleteAllTransactions: vi.fn().mockResolvedValue(undefined),
+    discoverDevices: vi.fn().mockResolvedValue([]),
+    captureScreen: vi.fn(),
     getTransaction: vi.fn(),
   };
 });
@@ -21,6 +23,7 @@ import {
   getSelectedTransaction,
   getStatusLabel,
   getVisibleTransactions,
+  refreshDevices,
   reconcileTransactions,
   requestDeleteAll,
   selectTransaction,
@@ -83,6 +86,9 @@ const incident = (signature: string, message: string): LogIncident =>
   }) as LogIncident;
 
 const reset = () => {
+  vi.mocked(api.captureScreen).mockClear();
+  vi.mocked(api.discoverDevices).mockClear();
+  vi.mocked(api.getTransaction).mockClear();
   ui.transactions = [];
   ui.transactionDetail = null;
   ui.detailLoading = false;
@@ -351,6 +357,17 @@ describe("getSelectedTransaction", () => {
     expect(ui.tab).toBe("Timeline");
     expect(ui.detailLoading).toBe(false);
   });
+
+  it("does not refetch detail when the selected detail is already loaded", async () => {
+    const detail = transaction({ id: "selected" });
+    ui.transactions = [detail];
+    ui.selectedId = detail.id;
+    ui.transactionDetail = detail;
+
+    await selectTransaction(detail.id);
+
+    expect(api.getTransaction).not.toHaveBeenCalled();
+  });
 });
 
 describe("getMatchingApps", () => {
@@ -395,6 +412,19 @@ describe("row states and counters", () => {
     expect(getRowStates().get("bad")).toBe("Failed");
     expect(getChangedCount()).toBe(0);
     expect(getFailedCount()).toBe(1);
+  });
+
+  it("reuses projections until the snapshot or filters change", () => {
+    ui.transactions = [transaction({ id: "cached" })];
+    const visible = getVisibleTransactions();
+    const states = getRowStates();
+
+    expect(getVisibleTransactions()).toBe(visible);
+    expect(getRowStates()).toBe(states);
+
+    ui.query = "missing";
+    expect(getVisibleTransactions()).not.toBe(visible);
+    expect(getVisibleTransactions()).toEqual([]);
   });
 
   it("counts incidents by crash/error/anr categories", () => {
@@ -477,5 +507,37 @@ describe("device mirror", () => {
     ui.device = "";
     await captureScreen();
     expect(ui.mirrorError).toContain("Select an Android device");
+  });
+
+  it("coalesces screen captures while the native request is pending", async () => {
+    ui.device = "device-1";
+    let finish!: (value: string) => void;
+    vi.mocked(api.captureScreen).mockReturnValueOnce(
+      new Promise((resolve) => (finish = resolve)),
+    );
+
+    const first = captureScreen();
+    const second = captureScreen();
+    expect(api.captureScreen).toHaveBeenCalledOnce();
+
+    finish("data:image/png;base64,abc");
+    await Promise.all([first, second]);
+    expect(ui.mirrorData).toContain("base64,abc");
+  });
+});
+
+describe("device discovery polling", () => {
+  it("coalesces overlapping native discovery requests", async () => {
+    let finish!: (value: []) => void;
+    vi.mocked(api.discoverDevices).mockReturnValueOnce(
+      new Promise((resolve) => (finish = resolve)),
+    );
+
+    const first = refreshDevices();
+    const second = refreshDevices();
+    expect(api.discoverDevices).toHaveBeenCalledOnce();
+
+    finish([]);
+    await Promise.all([first, second]);
   });
 });

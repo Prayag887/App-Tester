@@ -14,6 +14,7 @@
 mod adb;
 mod bridge;
 mod commands;
+mod startup;
 mod state;
 mod ui_payload;
 
@@ -36,33 +37,68 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&data_dir)?;
-            let database = Arc::new(Database::open(data_dir.join("inspector.sqlite"))?);
-            let events = androidqa_core::events::EventBroadcaster::default();
-            let ca_directory = data_dir.join("certificate-authority");
+            startup::show_native(app, &data_dir)?;
             let configured_device_path = data_dir.join("configured-android-proxy");
-            if let Ok(serial) = std::fs::read_to_string(&configured_device_path) {
-                let serial = serial.trim();
-                if !serial.is_empty()
-                    && let Ok(adb) = adb::adb()
-                {
-                    let _ = android::clear_proxy(adb, serial);
+            // ADB discovery and process startup can take seconds when the
+            // daemon is cold. Stale-device cleanup is best effort and must
+            // never hold the desktop window's startup path hostage.
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Ok(serial) = std::fs::read_to_string(&configured_device_path) {
+                    let serial = serial.trim();
+                    if !serial.is_empty()
+                        && let Ok(adb) = adb::adb()
+                    {
+                        let _ = android::clear_proxy(adb, serial);
+                    }
+                    let _ = std::fs::remove_file(configured_device_path);
                 }
-                let _ = std::fs::remove_file(&configured_device_path);
-            }
-            let proxy = Arc::new(ProxyService::new(
-                ProxyConfiguration {
-                    bind_address: "0.0.0.0".into(),
-                    port: 0,
-                    ca_certificate_path: ca_directory.join("app-tester-ca.pem"),
-                    ca_fingerprint_sha256: None,
-                },
-                database.clone(),
-                events.clone(),
-            ));
-            let state = InspectorState::new(proxy, database, ca_directory);
-            app.manage(state);
-            bridge::forward_events(app.handle());
+            });
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let initialized = (|| -> Result<InspectorState, String> {
+                    std::fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
+                    let database = Arc::new(
+                        Database::open(data_dir.join("inspector.sqlite"))
+                            .map_err(|error| error.to_string())?,
+                    );
+                    let compaction_database = database.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        let _ = compaction_database.compact_storage_if_worthwhile();
+                    });
+                    let events = androidqa_core::events::EventBroadcaster::default();
+                    let ca_directory = data_dir.join("certificate-authority");
+                    let proxy = Arc::new(ProxyService::new(
+                        ProxyConfiguration {
+                            bind_address: "0.0.0.0".into(),
+                            port: 0,
+                            ca_certificate_path: ca_directory.join("app-tester-ca.pem"),
+                            ca_fingerprint_sha256: None,
+                        },
+                        database.clone(),
+                        events,
+                    ));
+                    Ok(InspectorState::new(proxy, database, ca_directory))
+                })();
+
+                tauri::async_runtime::spawn(async move {
+                    startup::wait_until_splash_loaded(&handle).await;
+                    let event_handle = handle.clone();
+                    let _ = handle.run_on_main_thread(move || match initialized {
+                        Ok(state) => {
+                            event_handle.manage(state);
+                            bridge::forward_events(&event_handle);
+                            if let Err(error) = startup::create_main_webview(&event_handle) {
+                                eprintln!("failed to create App Tester window: {error}");
+                                event_handle.exit(1);
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("failed to initialize App Tester: {error}");
+                            event_handle.exit(1);
+                        }
+                    });
+                });
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -97,7 +133,9 @@ pub fn run() {
             composer::parse_curl,
             composer::generate_composer_curl,
             composer::pick_file,
-            composer::send_request
+            composer::send_request,
+            startup::frontend_ready,
+            startup::remember_startup_theme
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|error| {
@@ -108,8 +146,8 @@ pub fn run() {
         })
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                let state = app_handle.state::<InspectorState>();
-                if let Some(serial) = state.session.take_companion_device()
+                if let Some(state) = app_handle.try_state::<InspectorState>()
+                    && let Some(serial) = state.session.take_companion_device()
                     && let Ok(adb) = adb::adb()
                 {
                     let _ = android::stop_usb_companion_capture(adb, &serial);

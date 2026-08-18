@@ -54,6 +54,11 @@ fn migrations() -> Vec<Migration> {
             name: "0004_request_history",
             sql: include_str!("../../../../migrations/0004_request_history.sql"),
         },
+        Migration {
+            version: 5,
+            name: "0005_daily_endpoint_snapshots",
+            sql: include_str!("../../../../migrations/0005_daily_endpoint_snapshots.sql"),
+        },
     ]
 }
 
@@ -487,15 +492,15 @@ mod tests {
         let (conn, path, _dir) = temp_db();
         conn.pragma_update(None, "journal_mode", "WAL").unwrap();
         let version = MigrationEngine::migrate(&conn, &path).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
-        // schema_migrations has all 4 rows.
+        // schema_migrations has all 5 rows.
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 4);
+        assert_eq!(count, 5);
 
         // All expected tables exist.
         for table in &[
@@ -503,6 +508,7 @@ mod tests {
             "collections",
             "composer_environments",
             "history",
+            "endpoint_daily_snapshots",
         ] {
             let exists: i64 = conn
                 .query_row(
@@ -553,7 +559,7 @@ mod tests {
 
         // Migrate to latest.
         let version = MigrationEngine::migrate(&conn, &path).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
         // The collection row survived.
         let name: String = conn
@@ -638,7 +644,7 @@ mod tests {
 
         // Migrate.
         let version = MigrationEngine::migrate(&conn, &db_path).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
         // Legacy data survived.
         let name: String = conn
@@ -754,7 +760,7 @@ mod tests {
     fn in_memory_database_applies_all_migrations() {
         let conn = Connection::open_in_memory().unwrap();
         let version = MigrationEngine::migrate_in_memory(&conn).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
 
     #[test]
@@ -770,7 +776,7 @@ mod tests {
         assert_eq!(current_version(&conn).unwrap(), 0);
 
         let version = MigrationEngine::migrate_in_memory(&conn).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
 
     #[test]

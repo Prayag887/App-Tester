@@ -25,6 +25,7 @@ import type {
   ManualRequest,
   ProxyStatus,
 } from "./types";
+import { createDemoCapture } from "./demo-data";
 
 class UiState {
   screen = $state<Screen>("traffic");
@@ -60,33 +61,135 @@ class UiState {
   mirrorData = $state("");
   mirrorError = $state("");
   confirmDeleteAll = $state(false);
+  demoMode = $state(false);
 }
 
 export const ui = new UiState();
 
 let transactionRefreshInFlight = false;
+let deviceRefreshInFlight: Promise<void> | undefined;
+let screenCaptureInFlight: Promise<void> | undefined;
 let detailRequest = 0;
 export const UI_TRANSACTION_LIMIT = 250;
 
+type TransactionView = {
+  source: HttpTransaction[];
+  query: string;
+  changedOnly: boolean;
+  errorsOnly: boolean;
+  captured: HttpTransaction[];
+  visible: HttpTransaction[];
+  rowStates: Map<string, ReturnType<typeof transactionState>>;
+  changedCount: number;
+  failedCount: number;
+};
+
+let transactionView: TransactionView | undefined;
+
+function sameDevices(left: AndroidDevice[], right: AndroidDevice[]) {
+  if (left.length !== right.length) return false;
+  return left.every((device, index) => {
+    const other = right[index];
+    return (
+      device.serial === other.serial &&
+      device.authorization_status === other.authorization_status &&
+      device.model === other.model &&
+      device.android_version === other.android_version &&
+      device.api_level === other.api_level &&
+      device.resolution === other.resolution &&
+      device.density === other.density &&
+      device.architecture === other.architecture &&
+      device.product === other.product
+    );
+  });
+}
+
+function prependUniqueBounded<T>(
+  source: T[],
+  item: T,
+  isSame: (candidate: T) => boolean,
+  limit: number,
+) {
+  const result: T[] = [item];
+  for (const candidate of source) {
+    if (!isSame(candidate)) result.push(candidate);
+    if (result.length === limit) break;
+  }
+  return result;
+}
+
+function dailySnapshotKey(transaction: HttpTransaction) {
+  const endpoint = transaction.endpoint_identity;
+  if (!endpoint || !transaction.response) return undefined;
+  return `${endpoint.method} ${endpoint.host.toLowerCase()} ${endpoint.path_template} ${transaction.created_at.slice(0, 10)}`;
+}
+
+/**
+ * Computes all traffic-list projections in one pass and reuses the result
+ * until either the immutable native snapshot or a filter changes.
+ */
+function getTransactionView(): TransactionView {
+  const source = ui.transactions;
+  const query = ui.query.trim().toLowerCase();
+  const changedOnly = ui.changedOnly;
+  const errorsOnly = ui.errorsOnly;
+  if (
+    transactionView?.source === source &&
+    transactionView.query === query &&
+    transactionView.changedOnly === changedOnly &&
+    transactionView.errorsOnly === errorsOnly
+  ) {
+    return transactionView;
+  }
+
+  const captured: HttpTransaction[] = [];
+  const visible: HttpTransaction[] = [];
+  const rowStates = new Map<string, ReturnType<typeof transactionState>>();
+  let changedCount = 0;
+  let failedCount = 0;
+  for (const transaction of source) {
+    if (transaction.request.method.toUpperCase() === "CONNECT") continue;
+    captured.push(transaction);
+    const state = transactionState(transaction);
+    if (state === "Changed") changedCount += 1;
+    if (state === "Failed") failedCount += 1;
+    const matchesQuery =
+      !query ||
+      transaction.request.method.toLowerCase().includes(query) ||
+      transaction.request.host.toLowerCase().includes(query) ||
+      transaction.request.path.toLowerCase().includes(query) ||
+      String(transaction.response?.status ?? "").includes(query);
+    if (
+      matchesQuery &&
+      (!changedOnly || state === "Changed") &&
+      (!errorsOnly ||
+        state === "Failed" ||
+        transaction.correlated_incidents.length > 0)
+    ) {
+      visible.push(transaction);
+      rowStates.set(transaction.id, state);
+    }
+  }
+  transactionView = {
+    source,
+    query,
+    changedOnly,
+    errorsOnly,
+    captured,
+    visible,
+    rowStates,
+    changedCount,
+    failedCount,
+  };
+  return transactionView;
+}
+
 export function getCapturedTransactions() {
-  return ui.transactions.filter(
-    (tx) => tx.request.method.toUpperCase() !== "CONNECT",
-  );
+  return getTransactionView().captured;
 }
 
 export function getVisibleTransactions() {
-  const captured = getCapturedTransactions();
-  return captured.filter((tx) => {
-    const searchable =
-      `${tx.request.method} ${tx.request.host} ${tx.request.path} ${tx.response?.status ?? ""}`.toLowerCase();
-    return (
-      searchable.includes(ui.query.toLowerCase()) &&
-      (!ui.changedOnly || transactionState(tx) === "Changed") &&
-      (!ui.errorsOnly ||
-        transactionState(tx) === "Failed" ||
-        tx.correlated_incidents.length > 0)
-    );
-  });
+  return getTransactionView().visible;
 }
 
 export function getSelectedTransaction() {
@@ -99,10 +202,16 @@ export function getSelectedTransaction() {
 }
 
 export async function selectTransaction(id: string) {
+  if (ui.selectedId === id && ui.transactionDetail?.id === id) return;
   ui.selectedId = id;
   ui.transactionDetail = null;
   ui.detailLoading = true;
   const request = ++detailRequest;
+  if (ui.demoMode && id.startsWith("demo-")) {
+    ui.transactionDetail = ui.transactions.find((item) => item.id === id) ?? null;
+    ui.detailLoading = false;
+    return;
+  }
   try {
     const detail = await api.getTransaction(id);
     if (request === detailRequest && ui.selectedId === id) {
@@ -118,9 +227,7 @@ export async function selectTransaction(id: string) {
 /// Memoized per-row classification so the request list never recomputes
 /// `transactionState` for every row on every keystroke.
 export function getRowStates() {
-  return new Map(
-    getVisibleTransactions().map((tx) => [tx.id, transactionState(tx)]),
-  );
+  return getTransactionView().rowStates;
 }
 
 export function getSelectedDevice() {
@@ -141,15 +248,11 @@ export function getMatchingApps() {
 }
 
 export function getChangedCount() {
-  return getCapturedTransactions().filter(
-    (tx) => transactionState(tx) === "Changed",
-  ).length;
+  return getTransactionView().changedCount;
 }
 
 export function getFailedCount() {
-  return getCapturedTransactions().filter(
-    (tx) => transactionState(tx) === "Failed",
-  ).length;
+  return getTransactionView().failedCount;
 }
 
 export function getErrorCount() {
@@ -202,13 +305,24 @@ export function copySelectedCurl() {
 }
 
 export function upsertTransaction(transaction: HttpTransaction) {
+  if (ui.demoMode) {
+    ui.transactions = [];
+    ui.incidents = [];
+    ui.demoMode = false;
+    ui.desktopHost = "ADB reverse · USB";
+  }
   // The native proxy is the authority for the active capture. The WebView's
   // cached session can lag after a WebView restore; dropping its event
   // leaves a database row invisible until some unrelated UI refresh.
-  ui.transactions = [
+  ui.transactions = prependUniqueBounded(
+    ui.transactions,
     transaction,
-    ...ui.transactions.filter((item) => item.id !== transaction.id),
-  ].slice(0, UI_TRANSACTION_LIMIT);
+    (item) =>
+      item.id === transaction.id ||
+      (dailySnapshotKey(transaction) !== undefined &&
+        dailySnapshotKey(item) === dailySnapshotKey(transaction)),
+    UI_TRANSACTION_LIMIT,
+  );
 }
 
 export function upsertIncident(issue: LogIncident) {
@@ -219,19 +333,31 @@ export function upsertIncident(issue: LogIncident) {
     issue.occurrence_count,
     existing ? existing.occurrence_count + 1 : 1,
   );
-  ui.incidents = [
+  ui.incidents = prependUniqueBounded(
+    ui.incidents,
     { ...issue, occurrence_count },
-    ...ui.incidents.filter((item) => item.signature !== issue.signature),
-  ].slice(0, 100);
+    (item) => item.signature === issue.signature,
+    100,
+  );
 }
 
 export function reconcileTransactions(fresh: HttpTransaction[]) {
   // Event delivery gives us the lowest-latency update, while the database
   // read repairs anything delivered while the WebView was unavailable. Do
   // not let an empty/stale read erase a transaction that has just arrived.
-  const byId = new Map(ui.transactions.map((item) => [item.id, item]));
-  fresh.forEach((item) => byId.set(item.id, item));
-  ui.transactions = [...byId.values()]
+  const merged: HttpTransaction[] = [];
+  for (const item of [...fresh, ...ui.transactions]) {
+    const dailyKey = dailySnapshotKey(item);
+    if (
+      merged.some(
+        (candidate) =>
+          candidate.id === item.id ||
+          (dailyKey !== undefined && dailySnapshotKey(candidate) === dailyKey),
+      )
+    ) continue;
+    merged.push(item);
+  }
+  ui.transactions = merged
     .sort((left, right) => right.created_at.localeCompare(left.created_at))
     .slice(0, UI_TRANSACTION_LIMIT);
 }
@@ -262,25 +388,37 @@ export async function refreshProxyStatus() {
   }
 }
 
-export async function refreshDevices() {
-  try {
-    ui.devices = await api.discoverDevices();
-    const nextDevice = ui.devices.some(
-      (item) =>
-        item.serial === ui.device && item.authorization_status === "authorized",
-    )
-      ? ui.device
-      : (ui.devices.find((item) => item.authorization_status === "authorized")
-          ?.serial ?? "");
-    if (nextDevice !== ui.device) {
-      ui.device = nextDevice;
-      // A USB device is normally selected automatically, so load its
-      // apps here rather than waiting for a second click.
-      void loadApps();
+export function refreshDevices(): Promise<void> {
+  if (deviceRefreshInFlight) return deviceRefreshInFlight;
+  deviceRefreshInFlight = (async () => {
+    try {
+      const devices = await api.discoverDevices();
+      // Avoid invalidating every picker-derived value when polling returns
+      // the same immutable device snapshot.
+      if (!sameDevices(devices, ui.devices)) {
+        ui.devices = devices;
+      }
+      const nextDevice = ui.devices.some(
+        (item) =>
+          item.serial === ui.device &&
+          item.authorization_status === "authorized",
+      )
+        ? ui.device
+        : (ui.devices.find((item) => item.authorization_status === "authorized")
+            ?.serial ?? "");
+      if (nextDevice !== ui.device) {
+        ui.device = nextDevice;
+        // A USB device is normally selected automatically, so load its
+        // apps here rather than waiting for a second click.
+        void loadApps();
+      }
+    } catch (error) {
+      ui.notice = `Could not refresh Android devices: ${String(error)}`;
+    } finally {
+      deviceRefreshInFlight = undefined;
     }
-  } catch (error) {
-    ui.notice = `Could not refresh Android devices: ${String(error)}`;
-  }
+  })();
+  return deviceRefreshInFlight;
 }
 
 export async function loadApps() {
@@ -338,6 +476,8 @@ export async function connectCompanion() {
     const connection = await api.openUsbCompanion(ui.device, ui.packageName);
     ui.activeSessionId = connection.session_id;
     ui.capturing = true;
+    ui.demoMode = false;
+    ui.desktopHost = "ADB reverse · USB";
     ui.transactions = [];
     ui.transactionDetail = null;
     ui.incidents = [];
@@ -355,6 +495,10 @@ export async function connectCompanion() {
 }
 
 export async function exportCapture() {
+  if (ui.demoMode) {
+    ui.notice = "Demo traffic is illustrative and is not included in exports.";
+    return;
+  }
   try {
     ui.notice = `Exported capture to ${await api.exportCaptureToFile()}`;
   } catch (error) {
@@ -389,17 +533,33 @@ export function requestDeleteAll() {
 async function performDeleteAll() {
   ui.busy = true;
   try {
-    await api.deleteAllTransactions();
+    if (!ui.demoMode) await api.deleteAllTransactions();
     ui.transactions = [];
     ui.transactionDetail = null;
     ui.incidents = [];
     ui.selectedId = "";
+    ui.demoMode = false;
+    ui.desktopHost = "ADB reverse · USB";
     ui.notice = "Deleted all captured traffic and diagnostics.";
   } catch (error) {
     ui.notice = `Could not delete captures: ${String(error)}`;
   } finally {
     ui.busy = false;
   }
+}
+
+export function loadDemoCapture() {
+  const demo = createDemoCapture();
+  ui.transactions = demo.transactions;
+  ui.incidents = demo.incidents;
+  ui.transactionDetail = null;
+  ui.selectedId = "";
+  ui.query = "";
+  ui.changedOnly = false;
+  ui.errorsOnly = false;
+  ui.demoMode = true;
+  ui.desktopHost = "Offline demo · no device";
+  ui.notice = "Demo capture loaded — select any request to explore it.";
 }
 
 export async function importCapture(event: Event) {
@@ -409,6 +569,8 @@ export async function importCapture(event: Event) {
     await api.importCapture(await file.text());
     ui.transactions = await api.listTransactions();
     ui.transactionDetail = null;
+    ui.demoMode = false;
+    ui.desktopHost = "Imported capture · offline";
     ui.notice = "Imported redacted capture.";
   } catch (error) {
     ui.notice = String(error);
@@ -424,20 +586,30 @@ export function setMirrorOpen(next: boolean) {
   }
 }
 
-export async function captureScreen() {
-  if (!ui.device) {
-    ui.mirrorError = "Select an Android device to mirror.";
-    return;
-  }
-  try {
-    ui.mirrorData = await api.captureScreen(ui.device);
-    ui.mirrorError = "";
-  } catch (error) {
-    ui.mirrorError = String(error);
-  }
+export function captureScreen(): Promise<void> {
+  if (screenCaptureInFlight) return screenCaptureInFlight;
+  screenCaptureInFlight = (async () => {
+    if (!ui.device) {
+      ui.mirrorError = "Select an Android device to mirror.";
+      return;
+    }
+    try {
+      ui.mirrorData = await api.captureScreen(ui.device);
+      ui.mirrorError = "";
+    } catch (error) {
+      ui.mirrorError = String(error);
+    }
+  })().finally(() => {
+    screenCaptureInFlight = undefined;
+  });
+  return screenCaptureInFlight;
 }
 
 export async function approveBaseline(tx: HttpTransaction) {
+  if (ui.demoMode) {
+    ui.notice = "Demo comparisons are read-only.";
+    return;
+  }
   const id = endpointId(tx);
   if (!id) {
     ui.notice =

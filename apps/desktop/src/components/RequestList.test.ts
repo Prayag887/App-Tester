@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import { afterEach, describe, expect, it } from "vitest";
 import { ui } from "../stores.svelte";
 import type { HttpTransaction } from "../types";
@@ -41,6 +41,7 @@ afterEach(() => {
   ui.transactions = [];
   ui.selectedId = "";
   ui.transactionDetail = null;
+  ui.demoMode = false;
   ui.query = "";
 });
 
@@ -73,5 +74,15 @@ describe("RequestList", () => {
     expect(getByText("Adjust the search or active filters.")).toBeTruthy();
     expect(queryByText("No traffic yet")).toBeNull();
     ui.query = "";
+  });
+
+  it("loads an explorable capture without an Android device", async () => {
+    const { getByRole } = render(RequestList);
+
+    await fireEvent.click(getByRole("button", { name: "Load demo traffic" }));
+
+    expect(ui.demoMode).toBe(true);
+    expect(ui.transactions).toHaveLength(5);
+    expect(ui.incidents).toHaveLength(1);
   });
 });

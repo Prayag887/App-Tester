@@ -16,6 +16,7 @@ export type TransactionState = "Pending" | "Failed" | "Changed" | "Captured";
 export const transactionState = (tx: HttpTransaction): TransactionState => {
   if (!tx.response) return "Pending";
   if (tx.response.status >= 400) return "Failed";
+  if ((tx.daily_changes?.count ?? 0) > 0) return "Changed";
   if (tx.comparison?.differences.some((difference) => !difference.ignored))
     return "Changed";
   return "Captured";
@@ -33,6 +34,13 @@ export interface TextPreview {
   truncated: boolean;
   shown: number;
   total: number;
+}
+
+export interface ImagePreview {
+  name: string;
+  mediaType: string;
+  byteLength: number;
+  dataUrl: string;
 }
 
 const textDecoder = new TextDecoder();
@@ -81,6 +89,103 @@ export const bodyTextPreview = (
   };
 };
 
+const SAFE_IMAGE_MEDIA_TYPE =
+  /^image\/(?:png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)$/i;
+const byteEncoder = new TextEncoder();
+
+function bodyBytes(value: CapturedBody | undefined): number[] | undefined {
+  if (!value || value.storage === "empty" || value.storage === "unavailable")
+    return undefined;
+  return value.storage === "inline" ? value.bytes : value.preview;
+}
+
+function bytesIndexOf(source: Uint8Array, target: Uint8Array, from = 0): number {
+  if (!target.length) return from;
+  outer: for (let index = from; index <= source.length - target.length; index += 1) {
+    for (let offset = 0; offset < target.length; offset += 1) {
+      if (source[index + offset] !== target[offset]) continue outer;
+    }
+    return index;
+  }
+  return -1;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Extracts complete, browser-safe raster image parts from a bounded body
+ * preview. SVG is deliberately excluded because captured markup must never
+ * become active content in the Inspector.
+ */
+export function bodyImagePreviews(
+  value: CapturedBody | undefined,
+  contentType: string | null | undefined,
+): ImagePreview[] {
+  const storedBytes = bodyBytes(value);
+  if (!storedBytes?.length || !contentType) return [];
+  const bytes = new Uint8Array(storedBytes);
+  const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
+
+  if (SAFE_IMAGE_MEDIA_TYPE.test(mediaType)) {
+    const complete =
+      value?.storage === "inline" ||
+      ((value?.storage === "artifact" || value?.storage === "truncated") &&
+        value.original_size === bytes.length);
+    if (!complete) return [];
+    return [{
+      name: "Image body",
+      mediaType,
+      byteLength: bytes.length,
+      dataUrl: `data:${mediaType};base64,${bytesToBase64(bytes)}`,
+    }];
+  }
+
+  if (mediaType !== "multipart/form-data") return [];
+  const boundaryMatch = contentType.match(
+    /(?:^|;)\s*boundary=(?:"([^"]+)"|([^;\s]+))/i,
+  );
+  const boundary = boundaryMatch?.[1] ?? boundaryMatch?.[2];
+  if (!boundary) return [];
+
+  const delimiter = byteEncoder.encode(`--${boundary}`);
+  const nextDelimiter = byteEncoder.encode(`\r\n--${boundary}`);
+  const headerEndMarker = byteEncoder.encode("\r\n\r\n");
+  const previews: ImagePreview[] = [];
+  let partStart = bytesIndexOf(bytes, delimiter);
+
+  while (partStart >= 0) {
+    const headersStart = partStart + delimiter.length + 2;
+    const headersEnd = bytesIndexOf(bytes, headerEndMarker, headersStart);
+    if (headersEnd < 0) break;
+    const bodyStart = headersEnd + headerEndMarker.length;
+    const bodyEnd = bytesIndexOf(bytes, nextDelimiter, bodyStart);
+    if (bodyEnd < 0) break;
+
+    const headers = textDecoder.decode(bytes.subarray(headersStart, headersEnd));
+    const partType = headers.match(/^content-type:\s*([^;\r\n]+)/im)?.[1]?.trim().toLowerCase();
+    if (partType && SAFE_IMAGE_MEDIA_TYPE.test(partType)) {
+      const disposition = headers.match(/^content-disposition:\s*([^\r\n]+)/im)?.[1] ?? "";
+      const filename = disposition.match(/filename="([^"]*)"/i)?.[1];
+      const fieldName = disposition.match(/name="([^"]*)"/i)?.[1];
+      const imageBytes = bytes.subarray(bodyStart, bodyEnd);
+      previews.push({
+        name: filename || fieldName || `Image ${previews.length + 1}`,
+        mediaType: partType,
+        byteLength: imageBytes.length,
+        dataUrl: `data:${partType};base64,${bytesToBase64(imageBytes)}`,
+      });
+    }
+    partStart = bodyEnd + 2;
+  }
+  return previews;
+}
+
 /** Bounds already-decoded content such as generated cURL commands. */
 export const textPreview = (
   value: string,
@@ -105,13 +210,13 @@ export const endpointId = (tx: HttpTransaction): string | undefined =>
   `${tx.endpoint_identity.method} ${tx.endpoint_identity.host} ${tx.endpoint_identity.path_template}`;
 
 const SENSITIVE_CURL_HEADER =
-  /((?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key)\s*:\s*)([^'"\r\n]+)/gi;
+  /((?:cookie|set-cookie|x-api-key|api-key)\s*:\s*)([^'"\r\n]+)/gi;
 
-/** Defense in depth for imported or legacy captures that contain raw secrets. */
+/** Keeps non-auth session secrets out of imported or legacy cURL commands. */
 export const redactCurlSecrets = (command: string): string =>
   command.replace(SENSITIVE_CURL_HEADER, "$1<redacted>");
 
-/** Returns a safe generated cURL command preferred for display and clipboard export. */
+/** Returns the generated cURL command, including locally captured auth tokens. */
 export const curlCommand = (
   tx: HttpTransaction | undefined,
 ): string | undefined => {
