@@ -127,6 +127,7 @@
   .request-columns { font-size: 10px; }
   .request-row { font-size: 12px; }
   .request-target small { font-size: 10.5px; }
+  .request-columns span:nth-child(5),.request-columns span:nth-child(6),.request-duration,.request-state { text-align: center; }
   .demo-capture {
     height: 36px;
     margin-top: 5px;

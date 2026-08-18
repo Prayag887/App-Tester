@@ -72,7 +72,7 @@
 [data-theme] .log-metrics :is(small,b) { color: inherit; }
 [data-theme] :is(.request-row,.header-list>div,.timeline>li,.difference-list article,.kv-row) { color: var(--theme-text); border-color: var(--theme-line); background: transparent; }
 [data-theme] :is(.request-row:hover,.menu button:hover,.menu button.selected,.sidenav nav button:hover,.toolbar>button:hover,.composer-bar>.icon-button:hover) { color: var(--theme-text); border-color: var(--theme-accent); background: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-input)); }
-[data-theme] :is(.request-row.selected,.sidenav nav button.active,.filter-button.active,.composer-tabs button.active,.wordmark-icon) { color: var(--theme-accent); border-color: var(--theme-accent); background: var(--theme-accent-soft); }
+[data-theme] :is(.request-row.selected,.sidenav nav button.active,.filter-button.active,.wordmark-icon) { color: var(--theme-accent); border-color: var(--theme-accent); background: var(--theme-accent-soft); }
 [data-theme] .sidenav nav button { color: var(--theme-muted); }
 [data-theme] :is(.wordmark b,.hero h1,.trigger-copy b,.connection-pill b,.inspector-heading b,.request-target b,.issue-title,.compare-summary b,.empty-state b,.compare-empty b,.log-empty b,.body-image-preview figcaption b) { color: var(--theme-text); }
 [data-theme] .hero p b { color: var(--theme-accent); }
@@ -83,6 +83,9 @@
 [data-theme] .tabs button { color: var(--theme-muted); }
 [data-theme] .tabs button.active { color: var(--theme-text); border-color: transparent; background: transparent; }
 [data-theme] .tabs button::after { background: var(--theme-accent); }
+[data-theme] .composer-tabs button { color: var(--theme-muted); }
+[data-theme] .composer-tabs button.active { color: var(--theme-text); border-color: transparent; background: transparent; }
+[data-theme] .composer-tabs button::after { background: var(--theme-accent); }
 [data-theme] :is(.detail-panel h3,.header-list b,.difference-list article code) { color: var(--theme-accent); }
 [data-theme] .filter-check svg { color: var(--theme-accent); }
 [data-theme] :is(.primary,.topbar .primary) { color: var(--theme-accent-text); border-color: var(--theme-accent); background: linear-gradient(135deg,var(--theme-accent),color-mix(in srgb,var(--theme-accent) 76%,var(--theme-text))); box-shadow: 0 9px 22px color-mix(in srgb,var(--theme-accent) 28%,transparent); }

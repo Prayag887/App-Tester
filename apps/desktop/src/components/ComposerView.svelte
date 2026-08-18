@@ -336,6 +336,41 @@
   <div class="hero-host"><small>SHORTCUT</small><b>⌘ ↵ to send</b></div>
 </section>
 
+<style>
+  .composer-tabs button {
+    position: relative;
+    border-bottom: 2px solid transparent;
+  }
+  .composer-tabs button::after {
+    position: absolute;
+    right: 12px;
+    bottom: -2px;
+    left: 12px;
+    height: 3px;
+    content: "";
+    border-radius: 999px;
+    background: var(--shell-accent);
+    opacity: 0;
+    transform: scaleX(.08);
+    transform-origin: center;
+    will-change: transform,opacity;
+    transition: transform 280ms cubic-bezier(.16,1,.3,1),opacity 160ms ease,box-shadow 240ms ease;
+  }
+  .composer-tabs button:hover::after { opacity: .58; transform: scaleX(.42); }
+  .composer-tabs button.active::after {
+    opacity: 1;
+    transform: scaleX(1);
+    box-shadow: 0 0 8px color-mix(in srgb,var(--shell-accent) 42%,transparent);
+    animation: composer-tab-indicator-lock 480ms linear(0,.28 15%,.76 42%,1.12 65%,.97 84%,1) both;
+  }
+  @keyframes composer-tab-indicator-lock {
+    0% { opacity: .58; transform: scaleX(.42); box-shadow: 0 0 0 transparent; }
+    64% { opacity: 1; transform: scaleX(1.12); box-shadow: 0 0 14px color-mix(in srgb,var(--shell-accent) 58%,transparent); }
+    84% { transform: scaleX(.97); }
+    100% { opacity: 1; transform: scaleX(1); box-shadow: 0 0 8px color-mix(in srgb,var(--shell-accent) 42%,transparent); }
+  }
+</style>
+
 <section class:has-response={Boolean(response) || Boolean(error) || busy} class="composer" bind:this={composerShell} style:--composer-request-width={`${composerRequestWidth}px`}>
   <div class="composer-request">
     <div class="composer-bar">
