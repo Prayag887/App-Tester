@@ -106,6 +106,7 @@
 [data-theme] :is(.request-list,.inspector,.log-feed,.composer-request) { outline: 1px solid color-mix(in srgb,var(--theme-line) 58%,transparent); outline-offset: -1px; }
 [data-theme] .quiet { color: var(--theme-text); border-color: var(--theme-line); background: var(--theme-input); }
 [data-theme] .quiet:hover { color: var(--theme-accent); border-color: var(--theme-accent); background: var(--theme-accent-soft); }
+[data-theme] button:disabled { color: color-mix(in srgb,var(--theme-muted) 72%,var(--theme-bg)); border-color: color-mix(in srgb,var(--theme-line) 72%,var(--theme-bg)); opacity: .72; }
 [data-theme] .menu button small { color: var(--theme-muted); }
 [data-theme] .menu button svg { color: var(--theme-success); }
 [data-theme] .search-field svg { color: var(--theme-muted); }
@@ -120,6 +121,11 @@
 [data-theme] .request-row[data-method="POST"] .method { color: var(--theme-accent); background: color-mix(in srgb,var(--theme-accent) 16%,var(--theme-input)); }
 [data-theme] :is(.request-row[data-method="PUT"],.request-row[data-method="PATCH"]) .method { color: var(--theme-warning); background: color-mix(in srgb,var(--theme-warning) 14%,var(--theme-input)); }
 [data-theme] .request-row[data-method="DELETE"] .method { color: var(--theme-danger); background: color-mix(in srgb,var(--theme-danger) 13%,var(--theme-input)); }
+[data-theme] .toolbar>button.active { color: var(--theme-accent); border-color: var(--theme-accent); background: var(--theme-accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--theme-accent) 30%,transparent); }
+[data-theme] .toolbar>button.confirming { color: var(--theme-danger); border-color: var(--theme-danger); background: color-mix(in srgb,var(--theme-danger) 14%,var(--theme-panel)); box-shadow: 0 7px 18px color-mix(in srgb,var(--theme-danger) 13%,transparent); }
+[data-theme] .toolbar>button.confirming b { color: var(--theme-danger); }
+[data-theme] .toolbar>button.copied { color: var(--theme-success); border-color: var(--theme-success); background: color-mix(in srgb,var(--theme-success) 13%,var(--theme-panel)); }
+[data-theme] .toolbar>button.copied svg { color: var(--theme-success); }
 [data-theme] :is(.tabs button:hover,.composer-tabs button:hover) { color: var(--theme-text); background: color-mix(in srgb,var(--theme-accent) 7%,transparent); }
 [data-theme] .inspector-heading span { color: var(--theme-accent); background: var(--theme-accent-soft); }
 [data-theme] .inspector-heading>strong { color: var(--theme-success); background: transparent; }
@@ -140,6 +146,7 @@
 [data-theme] .issue-title :is(p,time) { color: var(--theme-muted); }
 [data-theme] .issue-context { color: var(--theme-accent); background: color-mix(in srgb,var(--theme-accent) 10%,var(--theme-input)); }
 [data-theme] :is(.issue-summary>div,.issue-evidence>div) { color: var(--theme-text); border-color: var(--theme-line); background: var(--theme-input); }
-[data-theme] .issue-details small { color: var(--theme-accent); }
-[data-theme] .issue-details :is(p,ol) { color: var(--theme-text); }
+[data-theme] :is(.issue-details,.issue-expanded-content) small { color: var(--theme-accent); }
+[data-theme] :is(.issue-details,.issue-expanded-content) :is(p,ol) { color: var(--theme-text); }
+[data-theme] .issue-evidence pre { color: var(--theme-text); border: 1px solid var(--theme-line); background: var(--theme-panel); }
 [data-theme] .occurrences { color: var(--theme-danger); background: color-mix(in srgb,var(--theme-danger) 14%,var(--theme-panel)); }
