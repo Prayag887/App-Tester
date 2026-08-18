@@ -142,7 +142,24 @@
   .inspector-heading b { font-size: 12px; }
   .tabs { min-height: 44px; gap: 4px; padding: 4px 8px 0; }
   .tabs button { min-height: 39px; padding: 9px 11px; font-size: 12.5px; font-weight: 650; line-height: 1; }
-  .tabs button::after { right: 11px; bottom: 0; left: 11px; height: 3px; }
+  .tabs button::after {
+    right: 11px;
+    bottom: 0;
+    left: 11px;
+    height: 3px;
+    opacity: 0;
+    transform: scaleX(.08);
+    transform-origin: center;
+    will-change: transform,opacity;
+    transition: transform 280ms cubic-bezier(.16,1,.3,1),opacity 160ms ease,box-shadow 240ms ease;
+  }
+  .tabs button:hover::after { opacity: .58; transform: scaleX(.42); }
+  .tabs button.active::after {
+    opacity: 1;
+    transform: scaleX(1);
+    box-shadow: 0 0 8px color-mix(in srgb,var(--shell-accent) 42%,transparent);
+    animation: tab-indicator-lock 480ms linear(0,.28 15%,.76 42%,1.12 65%,.97 84%,1) both;
+  }
   .detail-panel { padding: 14px; font-size: 12.5px; }
   .detail-panel h3 { margin: 16px 0 8px; font-size: 11px; font-weight: 750; }
   .detail-panel pre { font-size: 12.5px; line-height: 1.65; }
@@ -153,4 +170,10 @@
   .compare-summary > div > span { font-size: 11px; }
   .compare-summary b { font-size: 13px; }
   .difference-list article { font-size: 12.5px; line-height: 1.5; }
+  @keyframes tab-indicator-lock {
+    0% { opacity: .58; transform: scaleX(.42); box-shadow: 0 0 0 transparent; }
+    64% { opacity: 1; transform: scaleX(1.12); box-shadow: 0 0 14px color-mix(in srgb,var(--shell-accent) 58%,transparent); }
+    84% { transform: scaleX(.97); }
+    100% { opacity: 1; transform: scaleX(1); box-shadow: 0 0 8px color-mix(in srgb,var(--shell-accent) 42%,transparent); }
+  }
 </style>
