@@ -24,7 +24,7 @@ describe("desktop performance budgets", () => {
     expect(motion).toContain("--motion-spatial-fast");
     expect(motion).toContain("--motion-effect-fast");
     expect(motion).toContain("prefers-reduced-motion");
-    expect(motion).toContain("motion-startup-veil");
+    expect(motion).not.toContain("motion-startup-veil");
     expect(stylesheet).toContain("--shell-accent");
     expect(stylesheet).toContain(".workbench.inspector-open");
   });

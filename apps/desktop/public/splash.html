@@ -17,21 +17,8 @@
         display: grid;
         place-items: center;
         color: var(--splash-text);
-        background:
-          radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--splash-accent) 15%, transparent) 0, transparent 31%),
-          var(--splash-bg);
+        background: var(--splash-bg);
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-      .ambient {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: min(52vw, 620px);
-        aspect-ratio: 1;
-        border: 1px solid color-mix(in srgb, var(--splash-accent) 12%, transparent);
-        border-radius: 42% 58% 55% 45% / 49% 42% 58% 51%;
-        opacity: .72;
-        animation: ambient-turn 8s linear infinite;
       }
       .splash {
         position: relative;
@@ -122,10 +109,6 @@
       @keyframes logo-arrive { from { opacity: 0; transform: scale(.72) rotate(-5deg); filter: blur(6px); } }
       @keyframes logo-float { 50% { transform: translateY(-7px); } }
       @keyframes pulse { 0% { opacity: 0; transform: scale(.86); } 28% { opacity: .75; } 100% { opacity: 0; transform: scale(1.14); } }
-      @keyframes ambient-turn {
-        from { transform: translate(-50%, -50%) rotate(0); }
-        to { transform: translate(-50%, -50%) rotate(360deg); }
-      }
       @keyframes draw-check { to { stroke-dashoffset: 0; } }
       @keyframes letter-in { to { opacity: 1; transform: none; } }
       @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -136,7 +119,6 @@
     </style>
   </head>
   <body>
-    <div class="ambient" aria-hidden="true"></div>
     <main class="splash" role="status" aria-label="Starting App Tester">
       <div class="logo-wrap" aria-hidden="true">
         <svg viewBox="0 0 96 96">
