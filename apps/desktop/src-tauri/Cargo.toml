@@ -21,7 +21,7 @@ uuid.workspace = true
 time.workspace = true
 reqwest.workspace = true
 rfd = "0.15.4"
-base64 = "0.22"
+base64 = "0.23"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 
