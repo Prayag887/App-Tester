@@ -84,4 +84,44 @@ describe("Inspector", () => {
     ).toHaveLength(UI_TEXT_PREVIEW_LIMIT);
     expect(screen.getByText(/65,536 of 69,632 characters/)).toBeTruthy();
   });
+
+  it("closes the contextual inspector and clears its cached detail", async () => {
+    ui.transactionDetail = transaction;
+    render(Inspector);
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Close request inspector" }),
+    );
+
+    expect(ui.selectedId).toBe("");
+    expect(ui.transactionDetail).toBeNull();
+  });
+
+  it("renders an image uploaded in multipart form data", () => {
+    const prefix = new TextEncoder().encode(
+      '--image-boundary\r\nContent-Disposition: form-data; name="photo"; filename="photo.png"\r\nContent-Type: image/png\r\n\r\n',
+    );
+    const suffix = new TextEncoder().encode("\r\n--image-boundary--\r\n");
+    ui.transactions = [{
+      ...transaction,
+      request: {
+        ...transaction.request,
+        method: "POST",
+        content_type: "multipart/form-data; boundary=image-boundary",
+        body: {
+          storage: "inline",
+          bytes: [...prefix, 137, 80, 78, 71, ...suffix],
+        },
+      },
+    }];
+    ui.tab = "Request";
+
+    render(Inspector);
+
+    const image = screen.getByRole("img", {
+      name: "Multipart upload preview: photo.png",
+    });
+    expect(image.getAttribute("src")).toBe("data:image/png;base64,iVBORw==");
+    expect(screen.getByText("image/png · 4 B")).toBeTruthy();
+  });
 });

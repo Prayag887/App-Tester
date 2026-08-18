@@ -1,5 +1,7 @@
 //! cURL command generation from captured requests.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
 use super::model::{CapturedRequest, GeneratedCurl, HeaderEntry};
 use super::redact::{is_secret, redact_headers};
 
@@ -109,12 +111,22 @@ fn generate_curl_with_headers(
             shell_quote(&format!("{}: {}", header.name, header.value)),
         ]);
     }
-    if let Some(body) = request.body.bytes().filter(|bytes| !bytes.is_empty()) {
-        let body = String::from_utf8_lossy(body);
-        args.extend(["--data-raw".into(), shell_quote(&body)]);
-    }
-    let compact = args.join(" ");
-    let multiline = args
+    let encoded_body = request
+        .body
+        .bytes()
+        .filter(|bytes| !bytes.is_empty())
+        .and_then(|body| {
+            if body_needs_base64(request, body) {
+                args.extend(["--data-binary".into(), "@-".into()]);
+                Some(BASE64.encode(body))
+            } else {
+                let body = std::str::from_utf8(body).expect("text body was validated as UTF-8");
+                args.extend(["--data-raw".into(), shell_quote(body)]);
+                None
+            }
+        });
+    let curl_compact = args.join(" ");
+    let curl_multiline = args
         .chunks(2)
         .enumerate()
         .map(|(index, chunk)| {
@@ -127,11 +139,32 @@ fn generate_curl_with_headers(
         })
         .collect::<Vec<_>>()
         .join(" \\\n");
+    let (compact, multiline) = if let Some(encoded) = encoded_body {
+        let decoder = format!(
+            "printf '%s' {} | openssl base64 -d -A | ",
+            shell_quote(&encoded)
+        );
+        (
+            format!("{decoder}{curl_compact}"),
+            format!("{decoder}{curl_multiline}"),
+        )
+    } else {
+        (curl_compact, curl_multiline)
+    };
     GeneratedCurl {
         compact,
         multiline,
         redacted: true,
     }
+}
+
+fn body_needs_base64(request: &CapturedRequest, body: &[u8]) -> bool {
+    request.content_type.as_deref().is_some_and(|content_type| {
+        content_type
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("multipart/")
+    }) || std::str::from_utf8(body).is_err()
 }
 
 #[cfg(test)]
@@ -247,5 +280,34 @@ mod tests {
         let curl = generate_curl(&request);
         assert!(!curl.compact.contains("content-length"));
         assert!(curl.compact.contains("x-trace-id: abc"));
+    }
+
+    #[test]
+    fn base64_encodes_multipart_bodies_without_lossy_utf8_conversion() {
+        let body = b"--boundary\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\n\x00\xff\x80\r\n--boundary--\r\n";
+        let request = CapturedRequest {
+            method: "POST".into(),
+            scheme: "https".into(),
+            host: "example.com".into(),
+            port: None,
+            path: "/upload".into(),
+            query: vec![],
+            headers: vec![HeaderEntry {
+                name: "Content-Type".into(),
+                value: "multipart/form-data; boundary=boundary".into(),
+            }],
+            body: BodyStorage::Inline {
+                bytes: body.to_vec(),
+            },
+            content_type: Some("multipart/form-data; boundary=boundary".into()),
+            http_version: "HTTP/1.1".into(),
+        };
+
+        let curl = generate_curl(&request);
+
+        assert!(curl.compact.contains(&BASE64.encode(body)));
+        assert!(curl.compact.contains("openssl base64 -d -A"));
+        assert!(curl.compact.contains("--data-binary @-"));
+        assert!(!curl.compact.contains('\u{fffd}'));
     }
 }

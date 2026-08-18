@@ -1,5 +1,4 @@
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
+import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 
 type UpdateStatus =
   | "idle"
@@ -45,6 +44,7 @@ export async function checkForUpdates(manual = false) {
   updater.status = "checking";
   updater.message = "";
   try {
+    const { check } = await import("@tauri-apps/plugin-updater");
     const candidate = await check({ timeout: 20_000 });
     if (!candidate) {
       if (manual) showTemporaryStatus("up-to-date", "App Tester is up to date.");
@@ -80,6 +80,7 @@ export async function installUpdate() {
   try {
     await candidate.downloadAndInstall(onDownload);
     updater.message = "Update installed. Restarting App Tester…";
+    const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
   } catch (error) {
     updater.status = "available";

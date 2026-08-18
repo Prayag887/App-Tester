@@ -164,6 +164,7 @@ mod tests {
             capture_quality: CaptureQuality::Complete,
             comparison: None,
             correlated_incidents: vec![Uuid::new_v4()],
+            daily_changes: None,
             created_at: now,
             updated_at: now,
         }

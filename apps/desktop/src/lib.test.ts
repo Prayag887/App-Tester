@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bodyText,
   bodyTextPreview,
+  bodyImagePreviews,
   byteSizeLabel,
   curlCommand,
   durationMs,
@@ -117,6 +118,14 @@ describe("transactionState", () => {
       ),
     ).toBe("Captured");
   });
+
+  it("keeps a row marked changed after a later unchanged daily snapshot", () => {
+    expect(
+      transactionState(
+        transaction({ daily_changes: { count: 2 } }),
+      ),
+    ).toBe("Changed");
+  });
 });
 
 describe("durationMs", () => {
@@ -195,6 +204,48 @@ describe("bounded text previews", () => {
   });
 });
 
+describe("bodyImagePreviews", () => {
+  const multipart = (mediaType: string, body: number[]) => {
+    const prefix = new TextEncoder().encode(
+      `--preview-boundary\r\nContent-Disposition: form-data; name="photo"; filename="avatar.png"\r\nContent-Type: ${mediaType}\r\n\r\n`,
+    );
+    const suffix = new TextEncoder().encode(
+      "\r\n--preview-boundary--\r\n",
+    );
+    return [...prefix, ...body, ...suffix];
+  };
+
+  it("extracts a complete raster image from multipart form data", () => {
+    const bytes = [137, 80, 78, 71, 0, 255];
+    const previews = bodyImagePreviews(
+      { storage: "inline", bytes: multipart("image/png", bytes) },
+      "multipart/form-data; boundary=preview-boundary",
+    );
+
+    expect(previews).toEqual([{
+      name: "avatar.png",
+      mediaType: "image/png",
+      byteLength: bytes.length,
+      dataUrl: "data:image/png;base64,iVBORwD/",
+    }]);
+  });
+
+  it("does not render SVG or an incomplete multipart image part", () => {
+    expect(
+      bodyImagePreviews(
+        { storage: "inline", bytes: multipart("image/svg+xml", [60, 115, 118, 103, 62]) },
+        "multipart/form-data; boundary=preview-boundary",
+      ),
+    ).toEqual([]);
+    expect(
+      bodyImagePreviews(
+        { storage: "truncated", preview: multipart("image/png", [1, 2]).slice(0, -10), original_size: 100_000 },
+        "multipart/form-data; boundary=preview-boundary",
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe("prettyJson", () => {
   it("pretty-prints valid JSON and leaves other text untouched", () => {
     expect(prettyJson('{"a":1}')).toBe('{\n  "a": 1\n}');
@@ -246,20 +297,24 @@ describe("curlCommand", () => {
     expect(curlCommand(undefined)).toBeUndefined();
   });
 
-  it("redacts sensitive headers even when a legacy capture contains raw values", () => {
+  it("preserves auth tokens while redacting other legacy capture secrets", () => {
     const command = curlCommand(
       transaction({
         curl: {
           compact:
-            "curl -H 'Authorization: Bearer real-secret' -H 'X-Trace: public' https://api.example.test",
+            "curl -H 'Authorization: Bearer real-secret' -H 'Proxy-Authorization: Basic proxy-token' -H 'Cookie: sid=cookie-secret' -H 'X-Api-Key: api-secret' -H 'X-Trace: public' https://api.example.test",
           multiline: "",
           redacted: false,
         },
       }),
     );
 
-    expect(command).not.toContain("real-secret");
-    expect(command).toContain("Authorization: <redacted>");
+    expect(command).toContain("Authorization: Bearer real-secret");
+    expect(command).toContain("Proxy-Authorization: Basic proxy-token");
+    expect(command).not.toContain("cookie-secret");
+    expect(command).not.toContain("api-secret");
+    expect(command).toContain("Cookie: <redacted>");
+    expect(command).toContain("X-Api-Key: <redacted>");
     expect(command).toContain("X-Trace: public");
   });
 });

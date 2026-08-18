@@ -120,6 +120,7 @@ pub fn generate_curl_command(
         AuthSpec::None | AuthSpec::ApiKey { in_query: true, .. } => {}
     }
 
+    let mut encoded_stdin = None;
     match &request.body {
         ManualBody::None => {}
         ManualBody::Form { fields } => {
@@ -135,10 +136,10 @@ pub fn generate_curl_command(
             }
             args.extend(["--data-raw".to_owned(), shell_quote(text)]);
         }
-        ManualBody::Binary { bytes } => args.extend([
-            "--data-binary".to_owned(),
-            shell_quote(&String::from_utf8_lossy(bytes)),
-        ]),
+        ManualBody::Binary { bytes } => {
+            args.extend(["--data-binary".to_owned(), "@-".to_owned()]);
+            encoded_stdin = Some(BASE64.encode(bytes));
+        }
         ManualBody::Multipart { fields } => {
             for field in fields {
                 let value = if let Some(path) = &field.file {
@@ -159,7 +160,15 @@ pub fn generate_curl_command(
         }
     }
 
-    Ok(multiline_args(&args))
+    let command = multiline_args(&args);
+    Ok(if let Some(encoded) = encoded_stdin {
+        format!(
+            "printf '%s' {} | openssl base64 -d -A | {command}",
+            shell_quote(&encoded)
+        )
+    } else {
+        command
+    })
 }
 
 fn shell_quote(value: &str) -> String {
@@ -1122,5 +1131,24 @@ mod tests {
         assert!(command.contains("--insecure"));
         assert!(command.contains("--proxy 'http://localhost:8080'"));
         assert!(command.contains("--form 'artifact=@/tmp/my file.zip;type=application/zip'"));
+    }
+
+    #[test]
+    fn exports_binary_body_as_base64_backed_stdin() {
+        let request = ManualRequest {
+            method: "POST".into(),
+            url: "https://api.test/binary".into(),
+            body: ManualBody::Binary {
+                bytes: vec![0, 255, 128, b'\n'],
+            },
+            ..ManualRequest::default()
+        };
+
+        let command = generate_curl_command(&request, &SendOptions::default()).unwrap();
+
+        assert!(command.starts_with("printf '%s' 'AP+ACg=='"));
+        assert!(command.contains("openssl base64 -d -A"));
+        assert!(command.contains("--data-binary @-"));
+        assert!(!command.contains('\u{fffd}'));
     }
 }

@@ -25,8 +25,9 @@ use crate::{
     persistence::Database,
     proxy::{body_storage_from_capture, redact_body},
     traffic::{
-        BodyStorage, CaptureQuality, CapturedRequest, CapturedResponse, HeaderEntry,
-        HttpTransaction, QueryParameter, TransactionState, TransactionTiming,
+        BodyStorage, CaptureQuality, CapturedRequest, CapturedResponse, EndpointIdentity,
+        HeaderEntry, HttpTransaction, QueryParameter, TransactionState, TransactionTiming,
+        normalize_path, request_shape,
     },
 };
 
@@ -85,7 +86,7 @@ pub async fn send_manual(
 
     let result = execute(&request, &options, &url, &mut transaction, started_ms).await;
 
-    database
+    transaction.daily_changes = database
         .upsert_async(transaction.clone())
         .await
         .map_err(|error| SendError::Storage(error.to_string()))?;
@@ -137,6 +138,13 @@ async fn execute(
     }
     transaction.request.headers = effective_headers;
     transaction.request.content_type = request_content_type.clone();
+    transaction.endpoint_identity = Some(EndpointIdentity {
+        method: transaction.request.method.clone(),
+        host: transaction.request.host.to_lowercase(),
+        path_template: normalize_path(&transaction.request.path),
+        content_type: request_content_type.clone(),
+        request_shape: request_shape(&transaction.request.body),
+    });
     if !user_set_content_type(request)
         && let Some(media_type) = &request_content_type
     {
@@ -311,6 +319,7 @@ fn build_transaction(
         capture_quality: CaptureQuality::MetadataOnly,
         comparison: None,
         correlated_incidents: vec![],
+        daily_changes: None,
         created_at: started,
         updated_at: started,
     }

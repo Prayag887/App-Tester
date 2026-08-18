@@ -116,6 +116,15 @@ pub struct GeneratedCurl {
     pub redacted: bool,
 }
 
+/// Compact evidence that an endpoint changed during the snapshot's UTC day.
+/// Individual duplicate responses are replaced; this summary survives them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyChangeSummary {
+    pub count: u32,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub last_changed_at: Option<OffsetDateTime>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CaptureQuality {
@@ -139,6 +148,8 @@ pub struct HttpTransaction {
     pub capture_quality: CaptureQuality,
     pub comparison: Option<crate::comparison::ResponseComparison>,
     pub correlated_incidents: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily_changes: Option<DailyChangeSummary>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]

@@ -38,18 +38,27 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let database = Arc::new(Database::open(data_dir.join("inspector.sqlite"))?);
+            let compaction_database = database.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let _ = compaction_database.compact_storage_if_worthwhile();
+            });
             let events = androidqa_core::events::EventBroadcaster::default();
             let ca_directory = data_dir.join("certificate-authority");
             let configured_device_path = data_dir.join("configured-android-proxy");
-            if let Ok(serial) = std::fs::read_to_string(&configured_device_path) {
-                let serial = serial.trim();
-                if !serial.is_empty()
-                    && let Ok(adb) = adb::adb()
-                {
-                    let _ = android::clear_proxy(adb, serial);
+            // ADB discovery and process startup can take seconds when the
+            // daemon is cold. Stale-device cleanup is best effort and must
+            // never hold the desktop window's startup path hostage.
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Ok(serial) = std::fs::read_to_string(&configured_device_path) {
+                    let serial = serial.trim();
+                    if !serial.is_empty()
+                        && let Ok(adb) = adb::adb()
+                    {
+                        let _ = android::clear_proxy(adb, serial);
+                    }
+                    let _ = std::fs::remove_file(configured_device_path);
                 }
-                let _ = std::fs::remove_file(&configured_device_path);
-            }
+            });
             let proxy = Arc::new(ProxyService::new(
                 ProxyConfiguration {
                     bind_address: "0.0.0.0".into(),

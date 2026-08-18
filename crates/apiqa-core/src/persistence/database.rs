@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn schema_has_no_navigation_tables() {
         let db = Database::open_in_memory().unwrap();
-        assert_eq!(db.migration_version().unwrap(), 4);
+        assert_eq!(db.migration_version().unwrap(), 5);
         let count: i64 = db.connection().unwrap().query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE 'navigation_%'",
             [],
