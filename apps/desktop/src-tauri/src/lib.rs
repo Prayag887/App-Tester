@@ -145,13 +145,12 @@ pub fn run() {
             std::process::exit(1);
         })
         .run(|app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                if let Some(state) = app_handle.try_state::<InspectorState>()
-                    && let Some(serial) = state.session.take_companion_device()
-                    && let Ok(adb) = adb::adb()
-                {
-                    let _ = android::stop_usb_companion_capture(adb, &serial);
-                }
+            if let tauri::RunEvent::ExitRequested { .. } = event
+                && let Some(state) = app_handle.try_state::<InspectorState>()
+                && let Some(serial) = state.session.take_companion_device()
+                && let Ok(adb) = adb::adb()
+            {
+                let _ = android::stop_usb_companion_capture(adb, &serial);
             }
         });
 }
